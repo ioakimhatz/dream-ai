@@ -1,295 +1,183 @@
-// app/(auth)/onboarding.tsx - OPTIONAL ENHANCED ONBOARDING EXPERIENCE
+// app/(auth)/onboarding.tsx - QUESTIONS
+// ============================================
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-interface OnboardingStep {
-  id: number;
-  title: string;
-  description: string;
-  icon: string;
-  feature: string;
-}
-
-const ONBOARDING_STEPS: OnboardingStep[] = [
+const QUESTIONS = [
   {
-    id: 1,
-    title: 'Speak Your Dreams',
-    description: 'Simply describe what you dreamed about using your voice or by typing',
-    icon: '🎤',
-    feature: 'Voice-to-dream technology',
+    id: 'dream_frequency',
+    question: 'How often do you\nremember your dreams?',
+    options: ['Every morning', 'Few times a week', 'Rarely', 'Never'],
   },
   {
-    id: 2,
-    title: 'Add Your Face',
-    description: 'Upload photos to see yourself or others in your dream videos',
-    icon: '📸',
-    feature: 'AI face integration',
+    id: 'dream_type',
+    question: 'What dreams excite\nyou most?',
+    options: ['Adventure & Action', 'Surreal & Abstract', 'Romantic & Emotional', 'Dark & Mysterious'],
   },
   {
-    id: 3,
-    title: 'Watch Magic Happen',
-    description: 'Get stunning 18-second cinematic videos in minutes, not hours',
-    icon: '🎬',
-    feature: '3-clip cinema generation',
+    id: 'creation_goal',
+    question: 'What will you create\nwith Dream AI?',
+    options: ['Share on social media', 'Personal dream journal', 'Art & creativity', 'Explore my mind'],
   },
 ];
 
 export default function OnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
-  const scrollViewRef = useRef<ScrollView>(null);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
-  const nextStep = () => {
-    if (currentStep < ONBOARDING_STEPS.length - 1) {
+  const handleAnswer = (answer: string) => {
+    setAnswers(prev => ({
+      ...prev,
+      [QUESTIONS[currentStep].id]: answer
+    }));
+
+    if (currentStep < QUESTIONS.length - 1) {
+      // Animate to next
       Animated.sequence([
-        Animated.timing(fadeAnim, {
+        Animated.timing(slideAnim, {
+          toValue: -width,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: width,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
           toValue: 0,
-          duration: 150,
+          duration: 200,
           useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      setTimeout(() => {
+        })
+      ]).start(() => {
         setCurrentStep(currentStep + 1);
-        scrollViewRef.current?.scrollTo({ x: (currentStep + 1) * width, animated: true });
-      }, 150);
+      });
     } else {
-      handleGetStarted();
+      // Save answers and go to auth
+      router.push('/(auth)/auth-select' as any);
     }
   };
 
-  const skipOnboarding = () => {
-    router.replace('/(auth)/signup');
-  };
-
-  const handleGetStarted = () => {
-    router.replace('/(auth)/signup');
-  };
-
-  const currentStepData = ONBOARDING_STEPS[currentStep];
+  const progress = ((currentStep + 1) / QUESTIONS.length) * 100;
+  const current = QUESTIONS[currentStep];
 
   return (
-    <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Skip Button */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={skipOnboarding} style={styles.skipButton}>
-            <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
+    <SafeAreaView style={styles.container}>
+      {/* Progress Bar */}
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBar}>
+          <LinearGradient
+            colors={['#7278E6', '#E879F9']}
+            style={[styles.progressFill, { width: `${progress}%` }]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          />
         </View>
+      </View>
 
-        {/* Logo */}
-        <View style={styles.logoSection}>
-          <Text style={styles.logoIcon}>✨🌙✨</Text>
-          <Text style={styles.logoText}>Dream AI</Text>
-        </View>
+      {/* Back Button */}
+      {currentStep > 0 && (
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => setCurrentStep(currentStep - 1)}
+        >
+          <Text style={styles.backText}>←</Text>
+        </TouchableOpacity>
+      )}
 
-        {/* Main Content */}
-        <View style={styles.contentContainer}>
-          <Animated.View style={[styles.stepContent, { opacity: fadeAnim }]}>
-            {/* Feature Icon */}
-            <View style={styles.featureIconContainer}>
-              <Text style={styles.featureIcon}>{currentStepData.icon}</Text>
-            </View>
+      <Animated.View style={[
+        styles.content,
+        { transform: [{ translateX: slideAnim }] }
+      ]}>
+        <Text style={styles.question}>{current.question}</Text>
 
-            {/* Step Info */}
-            <Text style={styles.stepTitle}>{currentStepData.title}</Text>
-            <Text style={styles.stepDescription}>{currentStepData.description}</Text>
-            
-            {/* Feature Badge */}
-            <View style={styles.featureBadge}>
-              <Text style={styles.featureBadgeText}>{currentStepData.feature}</Text>
-            </View>
-          </Animated.View>
-        </View>
-
-        {/* Bottom Section */}
-        <View style={styles.bottomSection}>
-          {/* Progress Indicators */}
-          <View style={styles.progressContainer}>
-            {ONBOARDING_STEPS.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.progressDot,
-                  index === currentStep && styles.progressDotActive,
-                ]}
-              />
-            ))}
-          </View>
-
-          {/* Action Button */}
-          <TouchableOpacity style={styles.actionButton} onPress={nextStep}>
-            <LinearGradient
-              colors={['#7278E6', '#E879F9']}
-              style={styles.actionButtonGradient}
+        <View style={styles.optionsContainer}>
+          {current.options.map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={styles.optionButton}
+              onPress={() => handleAnswer(option)}
+              activeOpacity={0.7}
             >
-              <Text style={styles.actionButtonText}>
-                {currentStep === ONBOARDING_STEPS.length - 1 ? 'Get Started' : 'Next'}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* Step Counter */}
-          <Text style={styles.stepCounter}>
-            {currentStep + 1} of {ONBOARDING_STEPS.length}
-          </Text>
+              <Text style={styles.optionText}>{option}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </SafeAreaView>
-    </LinearGradient>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  skipButton: {
-    padding: 12,
-  },
-  skipText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '600',
-  },
-
-  // ========== LOGO SECTION ==========
-  logoSection: {
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  logoIcon: {
-    fontSize: 48,
-    marginBottom: 8,
-  },
-  logoText: {
-    fontSize: 52,
-    color: '#fff',
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  // ========== CONTENT ==========
-  contentContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
-  stepContent: {
-    alignItems: 'center',
-  },
-  featureIconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  featureIcon: {
-    fontSize: 64,
-  },
-  stepTitle: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  stepDescription: {
-    fontSize: 18,
-    color: 'rgba(255, 255, 255, 0.85)',
-    textAlign: 'center',
-    lineHeight: 26,
-    marginBottom: 24,
-  },
-  featureBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  featureBadgeText: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-
-  // ========== BOTTOM SECTION ==========
-  bottomSection: {
-    paddingHorizontal: 40,
-    paddingBottom: 40,
-    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
   progressContainer: {
-    flexDirection: 'row',
-    marginBottom: 32,
-    gap: 8,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    marginBottom: 20,
   },
-  progressDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  progressDotActive: {
-    backgroundColor: '#fff',
-    width: 24,
-  },
-  actionButton: {
-    width: '100%',
-    borderRadius: 16,
+  progressBar: {
+    height: 3,
+    backgroundColor: '#F0F0F2',
+    borderRadius: 1.5,
     overflow: 'hidden',
-    marginBottom: 16,
   },
-  actionButtonGradient: {
-    paddingVertical: 18,
-    alignItems: 'center',
+  progressFill: {
+    height: '100%',
   },
-  actionButtonText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.5,
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 10,
+    padding: 8,
   },
-  stepCounter: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontWeight: '500',
+  backText: {
+    fontSize: 28,
+    color: '#000',
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 80,
+  },
+  question: {
+    fontSize: 36,
+    fontWeight: '900',
+    color: '#000',
+    marginBottom: 60,
+    lineHeight: 42,
+  },
+  optionsContainer: {
+    gap: 16,
+  },
+  optionButton: {
+    backgroundColor: '#F5F5F7',
+    paddingVertical: 22,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  optionText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000',
+    textAlign: 'center',
   },
 });

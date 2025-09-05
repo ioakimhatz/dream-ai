@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 interface User {
   id: string;
@@ -23,6 +23,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithApple?: () => Promise<void>; // Optional for Android
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -138,6 +139,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
       Alert.alert('Sign In Failed', error.message || 'Please try again');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Apple Sign-In - Placeholder for now
+  const signInWithApple = async () => {
+    try {
+      setIsLoading(true);
+      
+      if (Platform.OS === 'ios') {
+        // For iOS, you would implement actual Apple Sign-In here later
+        // For now, show coming soon message
+        Alert.alert(
+          'Coming Soon',
+          'Apple Sign In will be available in the next update. Please use Google Sign In for now.'
+        );
+      } else {
+        // Android doesn't support Apple Sign-In
+        Alert.alert(
+          'Not Available',
+          'Apple Sign In is only available on iOS devices.'
+        );
+      }
+      
+    } catch (error) {
+      console.error('Apple Sign-In Error:', error);
+      Alert.alert('Sign In Failed', 'Please try Google Sign In instead');
     } finally {
       setIsLoading(false);
     }
@@ -282,6 +311,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         signInWithGoogle,
+        signInWithApple: Platform.OS === 'ios' ? signInWithApple : undefined,
         signInWithEmail,
         signUpWithEmail,
         signOut,

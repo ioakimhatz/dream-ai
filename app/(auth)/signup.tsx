@@ -1,4 +1,4 @@
-// app/(auth)/signup.tsx - WITH ACTUAL LOGO
+// app/(auth)/signup.tsx - WITH CONSISTENT LOGO FROM HOME SCREEN
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -81,15 +81,14 @@ export default function SignUpScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Logo Section - USING ACTUAL LOGO */}
+            {/* Logo Section - MATCHING HOME SCREEN EXACTLY */}
             <View style={styles.logoSection}>
-              <View style={styles.logoContainer}>
-                <Image 
-                  source={require('../../assets/images/logo.png')} 
-                  style={styles.logoImage}
-                  resizeMode="contain"
+              <View style={styles.logoRow}>
+                <Image
+                  source={require('../../assets/images/logo.png')}
+                  style={styles.logoImg}
                 />
-                <Text style={styles.logoText}>Dream AI</Text>
+                <Text style={styles.logoWord}>Dream AI</Text>
               </View>
               <Text style={styles.tagline}>Create your account to start dreaming</Text>
             </View>
@@ -118,7 +117,7 @@ export default function SignUpScreen() {
               {/* Email Input */}
               <View style={styles.inputContainer}>
                 <View style={styles.inputIcon}>
-                  <Text style={styles.iconText}>✉</Text>
+                  <Text style={styles.iconText}>✉️</Text>
                 </View>
                 <TextInput
                   style={styles.textInput}
@@ -150,7 +149,7 @@ export default function SignUpScreen() {
                   style={styles.eyeButton}
                   onPress={() => setShowPassword(!showPassword)}
                 >
-                  <Text style={styles.eyeIcon}>{showPassword ? '👁' : '👁‍🗨'}</Text>
+                  <Text style={styles.iconText}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -193,13 +192,21 @@ export default function SignUpScreen() {
                 <View style={styles.dividerLine} />
               </View>
 
-              {/* Google Sign Up */}
+              {/* Google Sign Up - SIMPLIFIED FOR NOW */}
               <TouchableOpacity
                 style={[styles.googleButton, isLoading && styles.buttonDisabled]}
                 onPress={handleGoogleSignUp}
                 disabled={isLoading}
               >
-                <Text style={styles.googleIcon}>G</Text>
+                {/* If you have a Google logo asset, replace this with:
+                    <Image 
+                      source={require('../../assets/images/google-logo.png')} 
+                      style={styles.googleLogoImage}
+                    />
+                */}
+                <View style={styles.googleLogoPlaceholder}>
+                  <Text style={styles.googleG}>G</Text>
+                </View>
                 <Text style={styles.googleButtonText}>Continue with Google</Text>
               </TouchableOpacity>
 
@@ -246,65 +253,73 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 40,
     paddingBottom: 40,
   },
 
-  // ========== LOGO SECTION - WITH ACTUAL IMAGE ==========
+  // ========== LOGO SECTION - MATCHING HOME SCREEN ==========
   logoSection: {
     alignItems: 'center',
-    marginBottom: 40,
-    paddingTop: 20,
+    marginBottom: 50,
+    paddingTop: 30,
   },
-  logoContainer: {
+  logoRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
+    transform: [{ translateX: -22 }], // Same as home screen
   },
-  logoImage: {
-    width: 80,
-    height: 80,
-    marginBottom: 12,
+  logoImg: {
+    width: 72,
+    height: 64,
+    resizeMode: 'contain',
+    marginRight: 3,
   },
-  logoText: {
+  logoWord: {
     fontSize: 52,
     color: '#fff',
     fontWeight: '800',
     letterSpacing: 0.5,
+    marginLeft: 0,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   tagline: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 17,
+    color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
     fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== AUTH CARD ==========
   authCard: {
     backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 28,
+    padding: 28,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
-    marginBottom: 24,
+    shadowRadius: 20,
+    elevation: 10,
+    marginBottom: 30,
   },
 
   // ========== WELCOME SECTION ==========
   welcomeTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
     color: '#0A2540',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   welcomeSubtitle: {
-    fontSize: 16,
+    fontSize: 17,
     color: '#68707D',
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 22,
+    marginBottom: 36,
+    lineHeight: 24,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== INPUT STYLES ==========
@@ -312,55 +327,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 16,
-    paddingHorizontal: 4,
+    marginBottom: 18,
+    paddingHorizontal: 6,
+    height: 56,
   },
   inputIcon: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
   iconText: {
-    fontSize: 18,
+    fontSize: 20,
   },
   textInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 17,
     color: '#0A2540',
-    paddingVertical: 14,
-    paddingHorizontal: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
     fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   eyeButton: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  eyeIcon: {
-    fontSize: 18,
   },
 
   // ========== BUTTONS ==========
   primaryButton: {
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: 'hidden',
-    marginBottom: 20,
-    marginTop: 8,
+    marginBottom: 24,
+    marginTop: 12,
   },
   primaryButtonGradient: {
-    paddingVertical: 18,
+    paddingVertical: 20,
     alignItems: 'center',
   },
   primaryButtonText: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '800',
     color: '#FFFFFF',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -370,7 +385,7 @@ const styles = StyleSheet.create({
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 20,
+    marginVertical: 24,
   },
   dividerLine: {
     flex: 1,
@@ -378,10 +393,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   dividerText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#68707D',
-    marginHorizontal: 16,
+    marginHorizontal: 18,
     fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== GOOGLE BUTTON ==========
@@ -392,20 +408,37 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    borderRadius: 16,
-    paddingVertical: 16,
-    marginBottom: 20,
+    borderRadius: 18,
+    paddingVertical: 18,
+    marginBottom: 24,
   },
-  googleIcon: {
-    fontSize: 18,
-    marginRight: 12,
+  googleLogoPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  googleG: {
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#4285F4',
   },
+  // Use this if you add a Google logo asset:
+  googleLogoImage: {
+    width: 24,
+    height: 24,
+    marginRight: 14,
+  },
   googleButtonText: {
-    fontSize: 16,
+    fontSize: 17,
     color: '#0A2540',
     fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== SIGNUP PROMPT ==========
@@ -413,49 +446,54 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   signupText: {
-    fontSize: 16,
+    fontSize: 17,
     color: '#68707D',
     fontWeight: '500',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   signupLink: {
-    fontSize: 16,
+    fontSize: 17,
     color: '#7278E6',
     fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== TRIAL INFO SECTION ==========
   trialInfo: {
     backgroundColor: 'rgba(114, 120, 230, 0.1)',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 18,
+    padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(114, 120, 230, 0.2)',
   },
   trialTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
     color: '#7278E6',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
   trialFeatures: {
-    gap: 4,
+    gap: 6,
   },
   trialFeature: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#68707D',
     fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 
   // ========== FOOTER ==========
   footer: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
-    lineHeight: 18,
-    marginTop: 20,
+    lineHeight: 20,
+    marginTop: 24,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
   },
 });
