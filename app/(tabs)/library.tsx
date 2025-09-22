@@ -1,4 +1,4 @@
-// app/(tabs)/library.tsx - PROFESSIONAL VIDEO PLAYER (NO EMOJIS)
+// app/(tabs)/library.tsx - FIXED DURATION DISPLAY
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { ResizeMode, Video } from 'expo-av';
@@ -13,14 +13,14 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   RefreshControl,
-  SafeAreaView,
   Share,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { deleteDream, getDreams, type DreamItem } from '../utils/storage';
@@ -440,12 +440,13 @@ function VideoPlayerModal({
   );
 }
 
-// Main Library Screen Component (UNCHANGED - keeping your original)
+// Main Library Screen Component
 export default function LibraryScreen() {
   const [items, setItems] = useState<DreamItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDream, setSelectedDream] = useState<DreamItem | null>(null);
   const [playerVisible, setPlayerVisible] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
     try {
@@ -519,9 +520,9 @@ export default function LibraryScreen() {
   };
 
   const renderDreamItem = ({ item }: { item: DreamItem }) => {
-    // Safe access to clips with proper null checking
+    // Check if this is a stitched video (has multiple clips or a single videoUrl)
     const hasMultipleClips = Boolean(item.clips && Array.isArray(item.clips) && item.clips.length > 1);
-    const hasClips = Boolean(item.clips && Array.isArray(item.clips) && item.clips.length > 0);
+    const isStitched = hasMultipleClips || Boolean(item.videoUrl && typeof item.videoUrl === 'string');
     
     return (
       <TouchableOpacity 
@@ -559,12 +560,20 @@ export default function LibraryScreen() {
             </LinearGradient>
           )}
           
-          {/* Duration Badge */}
-          <View style={styles.durationBadge}>
-            <Text style={styles.durationText}>
-              {hasClips ? '18s' : '6s'}
-            </Text>
-          </View>
+          {/* Duration Badge - Show "Dream Movie" for stitched videos */}
+          {isStitched ? (
+            <LinearGradient
+              colors={['#7C86FF', '#9D6FFF']}
+              style={styles.movieBadge}
+            >
+              <Ionicons name="film-outline" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+              <Text style={styles.movieText}>Dream Movie</Text>
+            </LinearGradient>
+          ) : (
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationText}>6s</Text>
+            </View>
+          )}
         </View>
         
         {/* Video Info */}
@@ -582,7 +591,18 @@ export default function LibraryScreen() {
 
   return (
     <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1 }}>
+      {/* FIX: Status Bar Configuration for Android */}
+      <StatusBar 
+        translucent={Platform.OS === 'android'}
+        backgroundColor="transparent"
+        barStyle="light-content"
+      />
+      
+      {/* FIX: Custom SafeAreaView handling for Android */}
+      <View style={{ 
+        flex: 1,
+        paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : insets.top,
+      }}>
         {/* ORIGINAL TITLE DESIGN */}
         <Text style={styles.title}>Your Dreams</Text>
         
@@ -609,7 +629,7 @@ export default function LibraryScreen() {
           }
           contentContainerStyle={{
             padding: 16,
-            paddingBottom: 28,
+            paddingBottom: Platform.OS === 'android' ? 100 : 28, // More padding for Android tab bar
             flexGrow: 1,
           }}
           renderItem={renderDreamItem}
@@ -623,12 +643,12 @@ export default function LibraryScreen() {
           onClose={handlePlayerClose}
           onDreamDeleted={handleDreamDeleted}
         />
-      </SafeAreaView>
+      </View>
     </LinearGradient>
   );
 }
 
-// Professional Modal Styles - NO EMOJIS
+// Professional Modal Styles with Android Font Fixes
 const modalStyles = StyleSheet.create({
   container: {
     flex: 1,
@@ -669,7 +689,8 @@ const modalStyles = StyleSheet.create({
   loadingText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   videoPlaceholder: {
@@ -686,7 +707,8 @@ const modalStyles = StyleSheet.create({
   videoPlaceholderText: {
     color: '#fff',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -697,6 +719,7 @@ const modalStyles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     lineHeight: 22,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   processingCloseContainer: {
@@ -736,14 +759,16 @@ const modalStyles = StyleSheet.create({
   videoTitle: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginBottom: 2,
   },
   
   videoSubtitle: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   topActions: {
@@ -803,7 +828,8 @@ const modalStyles = StyleSheet.create({
   dreamTitle: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     lineHeight: 22,
     marginBottom: 4,
   },
@@ -811,7 +837,8 @@ const modalStyles = StyleSheet.create({
   dreamDate: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   progressContainer: {
@@ -823,7 +850,8 @@ const modalStyles = StyleSheet.create({
   timeText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     minWidth: 35,
     textAlign: 'center',
   },
@@ -848,15 +876,16 @@ const modalStyles = StyleSheet.create({
   },
 });
 
-// Library Styles - ORIGINAL COLORS (keeping your design intact)
+// Library Styles with Android Font Fixes
 const styles = StyleSheet.create({
   title: {
-    fontSize: 45,
-    fontWeight: '800',
+    fontSize: Platform.OS === 'android' ? 40 : 45,
+    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
     color: '#fff',
     paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 24,
+    paddingTop: Platform.OS === 'android' ? 8 : 4,
+    paddingBottom: Platform.OS === 'android' ? 16 : 24,
   },
   
   row: {
@@ -870,11 +899,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
   
   thumbnailContainer: {
@@ -914,11 +949,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
   },
 
   cinemaBadge: {
@@ -928,17 +969,24 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   
   cinemaText: {
     color: '#FFFFFF',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     letterSpacing: 0.8,
   },
   
@@ -955,7 +1003,38 @@ const styles = StyleSheet.create({
   durationText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  },
+
+  movieBadge: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+
+  movieText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    letterSpacing: 0.3,
   },
   
   videoInfo: {
@@ -964,7 +1043,8 @@ const styles = StyleSheet.create({
   
   videoTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#1A1A1A',
     lineHeight: 20,
     marginBottom: 6,
@@ -972,8 +1052,9 @@ const styles = StyleSheet.create({
   
   videoDate: {
     fontSize: 12,
+    fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
     color: '#666666',
-    fontWeight: '500',
   },
   
   emptyContainer: {
@@ -985,7 +1066,8 @@ const styles = StyleSheet.create({
   
   emptyText: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: 'rgba(255,255,255,0.95)',
     marginTop: 20,
     marginBottom: 12,
@@ -993,6 +1075,8 @@ const styles = StyleSheet.create({
   
   emptySubtext: {
     fontSize: 16,
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
     color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
     paddingHorizontal: 40,
@@ -1018,4 +1102,4 @@ const createShortTitle = (prompt: string): string => {
   }
   
   return title + (title.length < firstSentence.length ? '...' : '');
-}
+};

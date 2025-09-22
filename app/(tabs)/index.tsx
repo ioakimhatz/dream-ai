@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx - HOME SCREEN WITH SUBSCRIPTION INTEGRATION
+// app/(tabs)/index.tsx - HOME SCREEN WITH DEMO MODE
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,13 +10,16 @@ import {
   Alert,
   Animated,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  StatusBar as RNStatusBar,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import 'react-native-get-random-values';
 import { v4 as uuid } from 'uuid';
 
@@ -143,6 +146,25 @@ const PromptStrengthIndicator = ({ prompt, onAnalysisChange }: {
 };
 
 export default function HomeScreen() {
+  // ADD THIS FIX FOR WHITE BARS - CRITICAL!
+  useEffect(() => {
+    const fixStatusBar = () => {
+      if (Platform.OS === 'android') {
+        RNStatusBar.setBackgroundColor('transparent', true);
+        RNStatusBar.setTranslucent(true);
+        RNStatusBar.setBarStyle('light-content', true);
+      }
+    };
+
+    // Fix immediately
+    fixStatusBar();
+    
+    // Fix again after a small delay (handles async rendering issues)
+    const timeout = setTimeout(fixStatusBar, 100);
+    
+    return () => clearTimeout(timeout);
+  }, []);
+
   const { user } = useAuth();
   
   // SUBSCRIPTION HOOKS
@@ -318,9 +340,11 @@ export default function HomeScreen() {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  // UPDATED GENERATE FUNCTION WITH SUBSCRIPTION CHECK
+  // GENERATE FUNCTION WITH SUBSCRIPTION CHECK COMMENTED FOR DEMO
   const handleGenerateDream = async () => {
     try {
+      // SUBSCRIPTION CHECK COMMENTED OUT FOR DEMO/TESTING
+      /*
       // CHECK SUBSCRIPTION FIRST
       if (!subscription) {
         Alert.alert(
@@ -343,6 +367,7 @@ export default function HomeScreen() {
         // User has reached their limit - useDream shows the alert
         return;
       }
+      */
 
       // Check prompt quality
       if (!promptAnalysis?.canGenerate) {
@@ -444,233 +469,236 @@ export default function HomeScreen() {
     );
   };
 
-  // UPDATED canGenerate logic with subscription check
-  const canGenerate = transcript && promptAnalysis?.canGenerate && !isGenerating && canGenerateDream;
+  // SIMPLIFIED FOR DEMO - NO SUBSCRIPTION CHECK
+  const canGenerate = transcript && promptAnalysis?.canGenerate && !isGenerating;
 
-  // UPDATED button text with subscription status
+  // SIMPLIFIED BUTTON TEXT FOR DEMO
   const getButtonText = () => {
     if (isGenerating) return 'Creating your dream cinema...';
-    if (!subscription) return 'Subscribe to Generate Dreams';
     if (!transcript) return 'Enter your dream first';
     if (!promptAnalysis?.canGenerate) return 'Add more details to generate';
-    if (!canGenerateDream) return 'Dream limit reached - Upgrade';
     return 'Generate Dream Cinema';
   };
 
   return (
-    <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Logo row */}
-        <View style={styles.logoRow}>
-          <Image
-            source={require('../../assets/images/logo.png')}
-            style={styles.logoImg}
-          />
-          <Text style={styles.logoWord}>Dream AI</Text>
-        </View>
-
-        {/* MIC WITH CLEAN REC INDICATOR */}
-        <View style={styles.micContainer}>
-          <TouchableOpacity
-            style={styles.micButton}
-            onPress={recording ? stopRecording : startRecording}
-            activeOpacity={0.8}
-          >
+    <View style={{ flex: 1 }}>
+      {/* ADD STATUS BAR AS FIRST ELEMENT - CRITICAL! */}
+      <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+      
+      <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Logo row */}
+          <View style={styles.logoRow}>
             <Image
-              source={require('../../assets/images/mic.png')}
-              style={styles.micIcon}
+              source={require('../../assets/images/logo.png')}
+              style={styles.logoImg}
             />
+            <Text style={styles.logoWord}>Dream AI</Text>
+          </View>
+
+          {/* MIC WITH CLEAN REC INDICATOR - FIXED GREY RECTANGLE */}
+          <View style={styles.micContainer}>
+            <TouchableOpacity
+              style={styles.micButton}
+              onPress={recording ? stopRecording : startRecording}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={require('../../assets/images/mic.png')}
+                style={styles.micIcon}
+              />
+              
+              {recording && (
+                <View style={styles.recIndicatorInside}>
+                  <View style={styles.recDot} />
+                  <Text style={styles.recText}>REC</Text>
+                </View>
+              )}
+            </TouchableOpacity>
             
+            {/* Wave Animation below the mic when recording */}
             {recording && (
-              <View style={styles.recIndicatorInside}>
-                <View style={styles.recDot} />
-                <Text style={styles.recText}>REC</Text>
+              <View style={styles.waveContainer}>
+                {waveAnimations.map((anim, index) => (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.waveLine,
+                      {
+                        height: anim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [8, 40],
+                        }),
+                      },
+                    ]}
+                  />
+                ))}
               </View>
             )}
-          </TouchableOpacity>
-          
-          {/* Wave Animation below the mic when recording */}
-          {recording && (
-            <View style={styles.waveContainer}>
-              {waveAnimations.map((anim, index) => (
-                <Animated.View
-                  key={index}
-                  style={[
-                    styles.waveLine,
-                    {
-                      height: anim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [8, 40],
-                      }),
-                    },
-                  ]}
-                />
-              ))}
+          </View>
+
+          <Text style={styles.prompt}>What did you dream?</Text>
+
+          <View style={styles.card}>
+            <TextInput
+              style={styles.transcriptTextInput}
+              multiline
+              placeholder={
+                isTranscribing
+                  ? 'Transcribing your voice...'
+                  : 'Describe your dream...'
+              }
+              placeholderTextColor="#ccc"
+              value={transcript}
+              onChangeText={setTranscript}
+              editable
+            />
+
+            {/* Prompt Strength Indicator */}
+            <PromptStrengthIndicator 
+              prompt={transcript}
+              onAnalysisChange={setPromptAnalysis}
+            />
+
+            {/* Image Upload Section with Background Removal */}
+            <View style={styles.imageSection}>
+              <Text style={styles.imageSectionTitle}>Who was in your dream?</Text>
+              <Text style={styles.imageSectionSubtitle}>
+                Add photos to see them in your dream video
+                {processedImages.size > 0 && ' • Background removed'}
+              </Text>
+              
+              {/* Processing Indicator */}
+              {isProcessingImage && (
+                <View style={styles.processingContainer}>
+                  <ActivityIndicator size="small" color="#7278E6" />
+                  <Text style={styles.processingText}>Removing background...</Text>
+                </View>
+              )}
+              
+              {/* Selected Images Grid */}
+              <View style={styles.imageGrid}>
+                {selectedImages.map((imageUri, index) => (
+                  <View key={index} style={styles.imageContainer}>
+                    <Image source={{ uri: imageUri }} style={styles.selectedImage} />
+                    {processedImages.get(imageUri) && (
+                      <View style={styles.processedBadge}>
+                        <Text style={styles.processedBadgeText}>✨</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={() => removeImage(index)}
+                    >
+                      <Text style={styles.removeButtonText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                
+                {/* Add Image Button */}
+                {selectedImages.length < 3 && !isProcessingImage && (
+                  <TouchableOpacity style={styles.addImageButton} onPress={pickImage}>
+                    <Text style={styles.addImageIcon}>+</Text>
+                    <Text style={styles.addImageText}>Add person</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-          )}
-        </View>
 
-        <Text style={styles.prompt}>What did you dream?</Text>
+            {/* USAGE INDICATOR - HIDDEN FOR DEMO */}
+            {/* {renderUsageIndicator()} */}
 
-        <View style={styles.card}>
-          <TextInput
-            style={styles.transcriptTextInput}
-            multiline
-            placeholder={
-              isTranscribing
-                ? 'Transcribing your voice...'
-                : 'Describe your dream...'
-            }
-            placeholderTextColor="#ccc"
-            value={transcript}
-            onChangeText={setTranscript}
-            editable
-          />
+            {/* Generate Button - SIMPLIFIED FOR DEMO */}
+            <TouchableOpacity
+              onPress={handleGenerateDream}
+              style={[
+                styles.generateBtn,
+                !canGenerate && styles.generateBtnDisabled
+              ]}
+              disabled={!canGenerate}
+            >
+              <Text style={[
+                styles.generateBtnText,
+                !canGenerate && styles.generateBtnTextDisabled
+              ]}>
+                {getButtonText()}
+              </Text>
+            </TouchableOpacity>
 
-          {/* Prompt Strength Indicator */}
-          <PromptStrengthIndicator 
-            prompt={transcript}
-            onAnalysisChange={setPromptAnalysis}
-          />
+            {/* Single 18-Second Video Preview */}
+            <View>
+              <Text style={styles.generatedPreview}>Generated video preview</Text>
 
-          {/* Image Upload Section with Background Removal */}
-          <View style={styles.imageSection}>
-            <Text style={styles.imageSectionTitle}>Who was in your dream?</Text>
-            <Text style={styles.imageSectionSubtitle}>
-              Add photos to see them in your dream video
-              {processedImages.size > 0 && ' • Background removed'}
-            </Text>
-            
-            {/* Processing Indicator */}
-            {isProcessingImage && (
-              <View style={styles.processingContainer}>
-                <ActivityIndicator size="small" color="#7278E6" />
-                <Text style={styles.processingText}>Removing background...</Text>
-              </View>
-            )}
-            
-            {/* Selected Images Grid */}
-            <View style={styles.imageGrid}>
-              {selectedImages.map((imageUri, index) => (
-                <View key={index} style={styles.imageContainer}>
-                  <Image source={{ uri: imageUri }} style={styles.selectedImage} />
-                  {processedImages.get(imageUri) && (
-                    <View style={styles.processedBadge}>
-                      <Text style={styles.processedBadgeText}>✨</Text>
+              {isGenerating ? (
+                <View style={styles.previewWrapper}>
+                  <Image
+                    source={require('../../assets/images/dream-preview.png')}
+                    style={[styles.previewImage, { opacity: 0.5 }]}
+                    blurRadius={8}
+                  />
+                  <ActivityIndicator
+                    size="large"
+                    color="#7278E6"
+                    style={styles.spinner}
+                  />
+                  <Text style={styles.loadingText}>
+                    {generationStep || 'Creating your dream cinema...'}
+                  </Text>
+                  <View style={styles.progressContainer}>
+                    <View style={styles.progressBar}>
+                      <View 
+                        style={[
+                          styles.progressFill, 
+                          { width: `${generationProgress}%` }
+                        ]} 
+                      />
                     </View>
-                  )}
-                  <TouchableOpacity
-                    style={styles.removeButton}
-                    onPress={() => removeImage(index)}
+                    <Text style={styles.progressText}>
+                      {Math.round(generationProgress)}%
+                    </Text>
+                  </View>
+                </View>
+              ) : finalVideoUri ? (
+                // Single 18-second video player
+                <View style={styles.previewVideoContainer}>
+                  <Video
+                    key={videoKey}
+                    source={{ uri: finalVideoUri }}
+                    style={styles.videoPlayer}
+                    useNativeControls={false}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay={true}
+                    isLooping={true}
+                    onPlaybackStatusUpdate={(status) => {
+                      if (status.isLoaded && status.durationMillis) {
+                        console.log('📹 Video duration:', Math.round(status.durationMillis / 1000), 'seconds');
+                      }
+                    }}
+                  />
+                  <TouchableOpacity 
+                    style={styles.replayButton}
+                    onPress={() => setVideoKey(prev => prev + 1)}
                   >
-                    <Text style={styles.removeButtonText}>×</Text>
+                    <Text style={styles.replayButtonText}>↻ Replay</Text>
                   </TouchableOpacity>
                 </View>
-              ))}
-              
-              {/* Add Image Button */}
-              {selectedImages.length < 3 && !isProcessingImage && (
-                <TouchableOpacity style={styles.addImageButton} onPress={pickImage}>
-                  <Text style={styles.addImageIcon}>+</Text>
-                  <Text style={styles.addImageText}>Add person</Text>
-                </TouchableOpacity>
+              ) : coverImage ? (
+                <Image source={{ uri: coverImage }} style={styles.previewImage} />
+              ) : (
+                <Image
+                  source={require('../../assets/images/dream-preview.png')}
+                  style={styles.previewImage}
+                />
               )}
             </View>
           </View>
-
-          {/* USAGE INDICATOR - NEW */}
-          {renderUsageIndicator()}
-
-          {/* Generate Button - UPDATED WITH SUBSCRIPTION CHECK */}
-          <TouchableOpacity
-            onPress={handleGenerateDream}
-            style={[
-              styles.generateBtn,
-              !canGenerate && styles.generateBtnDisabled
-            ]}
-            disabled={!canGenerate}
-          >
-            <Text style={[
-              styles.generateBtnText,
-              !canGenerate && styles.generateBtnTextDisabled
-            ]}>
-              {getButtonText()}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Single 18-Second Video Preview */}
-          <View>
-            <Text style={styles.generatedPreview}>Generated video preview</Text>
-
-            {isGenerating ? (
-              <View style={styles.previewWrapper}>
-                <Image
-                  source={require('../../assets/images/dream-preview.png')}
-                  style={[styles.previewImage, { opacity: 0.5 }]}
-                  blurRadius={8}
-                />
-                <ActivityIndicator
-                  size="large"
-                  color="#7278E6"
-                  style={styles.spinner}
-                />
-                <Text style={styles.loadingText}>
-                  {generationStep || 'Creating your dream cinema...'}
-                </Text>
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBar}>
-                    <View 
-                      style={[
-                        styles.progressFill, 
-                        { width: `${generationProgress}%` }
-                      ]} 
-                    />
-                  </View>
-                  <Text style={styles.progressText}>
-                    {Math.round(generationProgress)}%
-                  </Text>
-                </View>
-              </View>
-            ) : finalVideoUri ? (
-              // Single 18-second video player
-              <View style={styles.previewVideoContainer}>
-                <Video
-                  key={videoKey}
-                  source={{ uri: finalVideoUri }}
-                  style={styles.videoPlayer}
-                  useNativeControls={false}
-                  resizeMode={ResizeMode.COVER}
-                  shouldPlay={true}
-                  isLooping={true}
-                  onPlaybackStatusUpdate={(status) => {
-                    if (status.isLoaded && status.durationMillis) {
-                      console.log('📹 Video duration:', Math.round(status.durationMillis / 1000), 'seconds');
-                    }
-                  }}
-                />
-                <TouchableOpacity 
-                  style={styles.replayButton}
-                  onPress={() => setVideoKey(prev => prev + 1)}
-                >
-                  <Text style={styles.replayButtonText}>↻ Replay</Text>
-                </TouchableOpacity>
-              </View>
-            ) : coverImage ? (
-              <Image source={{ uri: coverImage }} style={styles.previewImage} />
-            ) : (
-              <Image
-                source={require('../../assets/images/dream-preview.png')}
-                style={styles.previewImage}
-              />
-            )}
-          </View>
-        </View>
-      </ScrollView>
-    </LinearGradient>
+        </ScrollView>
+      </LinearGradient>
+    </View>
   );
 }
 
-// CLEAN STYLES WITH SUBSCRIPTION ADDITIONS
+// STYLES WITH ANDROID FONT FIXES
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: {
@@ -698,12 +726,13 @@ const styles = StyleSheet.create({
   logoWord: {
     fontSize: 52,
     color: '#fff',
-    fontWeight: '800',
+    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
     letterSpacing: 0.5,
     marginLeft: 0,
   },
 
-  // Mic styles
+  // Mic styles - FIXED GREY RECTANGLE
   micContainer: {
     alignItems: 'center',
     marginTop: 10,
@@ -716,15 +745,22 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.6)',
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'transparent', // ensure no fill
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
     position: 'relative',
+    // ✅ FIX: Shadows only on iOS; disable Android elevation to avoid grey rectangle
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 0,
+      },
+    }),
   },
 
   micIcon: { 
@@ -755,7 +791,7 @@ const styles = StyleSheet.create({
   recText: {
     color: '#ffffff',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
     letterSpacing: 1,
   },
 
@@ -779,7 +815,8 @@ const styles = StyleSheet.create({
     fontSize: 28,
     color: '#fff',
     marginBottom: 18,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   card: {
@@ -799,7 +836,8 @@ const styles = StyleSheet.create({
   transcriptTextInput: {
     fontSize: 22,
     color: '#0A2540',
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginTop: 16,
     marginBottom: 16,
     minHeight: 100,
@@ -812,7 +850,8 @@ const styles = StyleSheet.create({
 
   imageSectionTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
     marginBottom: 4,
   },
@@ -821,6 +860,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#68707D',
     marginBottom: 12,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
 
   processingContainer: {
@@ -837,7 +877,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     color: '#7278E6',
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   imageGrid: {
@@ -896,7 +937,7 @@ const styles = StyleSheet.create({
   removeButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
     lineHeight: 16,
   },
 
@@ -915,18 +956,19 @@ const styles = StyleSheet.create({
   addImageIcon: {
     fontSize: 24,
     color: '#7278E6',
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
     marginBottom: 2,
   },
 
   addImageText: {
     fontSize: 10,
     color: '#7278E6',
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     textAlign: 'center',
   },
 
-  // SUBSCRIPTION USAGE INDICATOR - NEW
+  // SUBSCRIPTION USAGE INDICATOR
   usageIndicator: {
     backgroundColor: 'rgba(114, 120, 230, 0.1)',
     borderRadius: 12,
@@ -942,7 +984,8 @@ const styles = StyleSheet.create({
   usageText: {
     color: '#7278E6',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   upgradeHint: {
@@ -955,7 +998,7 @@ const styles = StyleSheet.create({
   upgradeHintText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
   },
 
   generateBtn: {
@@ -972,7 +1015,8 @@ const styles = StyleSheet.create({
   
   generateBtnText: { 
     color: '#fff', 
-    fontWeight: 'bold', 
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     fontSize: 18 
   },
   
@@ -992,7 +1036,8 @@ const styles = StyleSheet.create({
   generatedPreview: {
     color: '#7278E6',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginBottom: 8,
   },
 
@@ -1016,7 +1061,8 @@ const styles = StyleSheet.create({
     top: '50%',
     color: '#7278E6',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   previewVideoContainer: {
@@ -1046,7 +1092,8 @@ const styles = StyleSheet.create({
   replayButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   progressContainer: {
@@ -1073,7 +1120,8 @@ const styles = StyleSheet.create({
   progressText: {
     color: '#7278E6',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginTop: 8,
   },
 });
@@ -1094,6 +1142,7 @@ const strengthStyles = StyleSheet.create({
     color: '#6c757d',
     textAlign: 'center',
     fontStyle: 'italic',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   progressContainer: {
@@ -1118,7 +1167,8 @@ const strengthStyles = StyleSheet.create({
   
   scoreText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#495057',
     minWidth: 45,
     textAlign: 'right',
@@ -1126,7 +1176,8 @@ const strengthStyles = StyleSheet.create({
   
   strengthText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginBottom: 8,
     textAlign: 'center',
   },
@@ -1140,11 +1191,13 @@ const strengthStyles = StyleSheet.create({
     color: '#dc3545',
     marginBottom: 4,
     lineHeight: 18,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
   
   suggestionsTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#495057',
     marginBottom: 4,
   },
@@ -1154,5 +1207,6 @@ const strengthStyles = StyleSheet.create({
     color: '#28a745',
     marginBottom: 4,
     lineHeight: 18,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
 });

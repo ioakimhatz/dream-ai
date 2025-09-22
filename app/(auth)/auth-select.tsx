@@ -1,88 +1,153 @@
-// app/(auth)/auth-select.tsx - SIGN UP OPTIONS
+// app/(auth)/auth-select.tsx - WITH APPLE SIGN-IN
+import { Inter_400Regular, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
+import { Ionicons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { router } from 'expo-router';
 import React from 'react';
 import {
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Image,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function AuthSelectScreen() {
-  const { signInWithGoogle, signInWithApple } = useAuth();
+  const { signInWithGoogle, isLoading } = useAuth();
+  
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
 
-  const handleGoogleAuth = async () => {
+  if (!fontsLoaded) {
+    return null;
+  }
+
+  const handleAppleSignIn = async () => {
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      console.log('Apple Sign-In Success:', {
+        user: credential.user,
+        email: credential.email,
+        fullName: credential.fullName,
+        identityToken: credential.identityToken,
+        authorizationCode: credential.authorizationCode,
+      });
+      
+      // Navigate to home after successful sign-in
+      router.replace('/(tabs)' as any);
+      
+    } catch (e: any) {
+      if (e.code === 'ERR_CANCELED') {
+        console.log('User canceled Apple Sign-In');
+      } else {
+        console.error('Apple Sign-In failed:', e);
+        // Fallback to manual signin
+        router.push('/(auth)/signin');
+      }
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
-      // Auth context handles navigation
+      // Navigation handled by auth state change in _layout.tsx
     } catch (error) {
-      console.error('Google auth failed:', error);
+      console.error('Google sign-in failed:', error);
+      // Fallback to manual signin
+      router.push('/(auth)/signin');
     }
   };
 
-  const handleAppleAuth = async () => {
-    try {
-      // Check if signInWithApple exists (it's optional)
-      if (signInWithApple) {
-        await signInWithApple();
-      }
-      // Auth context handles navigation
-    } catch (error) {
-      console.error('Apple auth failed:', error);
-    }
+  const handleSkip = () => {
+    // Go directly to main app (will be handled by auth check)
+    router.replace('/(tabs)' as any);
   };
+
+  const handleBack = () => {
+    router.back();
+  };
+
+  // Assuming this is the last step after onboarding
+  const progress = 100;
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Create your account</Text>
-        <Text style={styles.subtitle}>
-          Start turning your dreams into cinematic reality
-        </Text>
-
-        <View style={styles.authButtons}>
-          {/* Google Sign In */}
-          <TouchableOpacity
-            style={styles.authButton}
-            onPress={handleGoogleAuth}
-            activeOpacity={0.8}
-          >
-            {/* Add your Google logo here */}
-            <Text style={styles.googleG}>G</Text>
-            <Text style={styles.authButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          {/* Apple Sign In - iOS only */}
-          {Platform.OS === 'ios' && signInWithApple && (
-            <TouchableOpacity
-              style={[styles.authButton, styles.appleButton]}
-              onPress={handleAppleAuth}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.appleLogo}></Text>
-              <Text style={[styles.authButtonText, styles.appleText]}>
-                Continue with Apple
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Optional: Email sign in */}
+      <View style={styles.header}>
+        {/* iOS Back Arrow */}
         <TouchableOpacity 
-          onPress={() => router.push('/(auth)/email-entry' as any)}
-          style={styles.emailOption}
+          style={styles.backButton}
+          onPress={handleBack}
         >
-          <Text style={styles.emailText}>or continue with email</Text>
+          <Ionicons name="chevron-back" size={28} color="#000" />
         </TouchableOpacity>
 
-        <Text style={styles.terms}>
-          By continuing, you agree to our{'\n'}
-          <Text style={styles.link}>Terms</Text> and{' '}
-          <Text style={styles.link}>Privacy Policy</Text>
-        </Text>
+        {/* Progress Bar - Full */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.content}>
+        <Text style={styles.title}>Save your progress</Text>
+        
+        <View style={styles.buttonContainer}>
+          {/* Apple Sign In - Only show on iOS */}
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity
+              style={[styles.appleButton, isLoading && styles.buttonDisabled]}
+              onPress={handleAppleSignIn}
+              activeOpacity={0.9}
+              disabled={isLoading}
+            >
+              <Ionicons name="logo-apple" size={20} color="#FFFFFF" />
+              <Text style={styles.appleText}>Sign in with Apple</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Google Sign In - Shows on both platforms */}
+          <TouchableOpacity
+            style={[styles.googleButton, isLoading && styles.buttonDisabled]}
+            onPress={handleGoogleSignIn}
+            activeOpacity={0.8}
+            disabled={isLoading}
+          >
+            <Image 
+              source={require('../../assets/images/google-logo.png')}
+              style={styles.googleLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.googleText}>
+              {isLoading ? 'Signing in...' : 'Sign in with Google'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Skip Option */}
+          <View style={styles.skipContainer}>
+            <Text style={styles.skipPrompt}>
+              Would you like to sign in later?{' '}
+              <Text 
+                style={styles.skipLink}
+                onPress={handleSkip}
+              >
+                Skip
+              </Text>
+            </Text>
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -93,76 +158,104 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 20,
+  },
+  backButton: {
+    padding: 4,
+    marginRight: 12,
+    marginLeft: -8,
+  },
+  progressContainer: {
+    flex: 1,
+  },
+  progressBar: {
+    height: 3,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 1.5,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#7E78EA', // Dream AI purple
+    borderRadius: 1.5,
+  },
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 60,
-    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -60, // Move content up a bit
   },
   title: {
-    fontSize: 32,
-    fontWeight: '900',
+    fontSize: 34,
+    fontFamily: 'Inter_700Bold',
     color: '#000',
-    marginBottom: 12,
     textAlign: 'center',
+    marginBottom: 60,
+    letterSpacing: -0.5,
   },
-  subtitle: {
-    fontSize: 17,
-    color: '#86868B',
-    marginBottom: 50,
-    textAlign: 'center',
+  buttonContainer: {
+    alignItems: 'stretch',
   },
-  authButtons: {
-    width: '100%',
-    gap: 16,
-  },
-  authButton: {
+  // Apple button - black like Cal AI
+  appleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5F5F7',
-    paddingVertical: 18,
-    borderRadius: 14,
-    gap: 12,
-  },
-  appleButton: {
-    backgroundColor: '#000',
-  },
-  googleG: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4285F4',
-  },
-  appleLogo: {
-    fontSize: 20,
-    color: '#FFFFFF',
-  },
-  authButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
+    backgroundColor: '#000000',
+    paddingVertical: 19,
+    borderRadius: 30,
+    marginBottom: 16,
   },
   appleText: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
     color: '#FFFFFF',
+    marginLeft: 10,
+    letterSpacing: -0.3,
   },
-  emailOption: {
-    marginTop: 30,
-  },
-  emailText: {
-    fontSize: 15,
-    color: '#7278E6',
-    fontWeight: '600',
-  },
-  terms: {
-    fontSize: 13,
-    color: '#86868B',
-    textAlign: 'center',
-    marginTop: 'auto',
+  // Google button - white with border like Cal AI
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 18,
+    borderRadius: 30,
+    borderWidth: 2,
+    borderColor: '#E5E5E5',
     marginBottom: 40,
-    lineHeight: 18,
   },
-  link: {
-    color: '#7278E6',
+  googleLogo: {
+    width: 20,
+    height: 20,
+    marginRight: 10,
+  },
+  googleText: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000',
+    letterSpacing: -0.3,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  skipContainer: {
+    alignItems: 'center',
+  },
+  skipPrompt: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#666',
+    textAlign: 'center',
+  },
+  skipLink: {
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000',
     textDecorationLine: 'underline',
   },
 });

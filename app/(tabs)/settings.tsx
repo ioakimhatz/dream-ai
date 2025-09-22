@@ -1,4 +1,4 @@
-// app/(tabs)/settings.tsx - WITH SUBSCRIPTION MANAGEMENT
+// app/(tabs)/settings.tsx - FIXED WITH CORRECT REVENUCAT PACKAGE IDS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +9,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -122,16 +123,44 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleSelectPlan = async (packageId: string) => {
-    const selectedPackage = offerings?.availablePackages.find(
+  const handleSignIn = () => {
+    router.push('/(auth)/signin');
+  };
+
+  // FIXED: Map UI plan names to RevenueCat package identifiers
+  const handleSelectPlan = async (planType: 'basic' | 'pro' | 'annual') => {
+    console.log('🎯 Plan selected:', planType);
+    
+    // Map plan types to RevenueCat package identifiers
+    const packageIdMap: Record<string, string> = {
+      'basic': '$rc_monthly',    // Basic Monthly
+      'pro': 'Monthly',          // Pro Monthly (custom identifier)
+      'annual': '$rc_annual'     // Annual
+    };
+    
+    const packageId = packageIdMap[planType];
+    console.log('📦 Looking for package:', packageId);
+    
+    if (!offerings?.availablePackages) {
+      console.error('❌ No offerings available');
+      Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
+      return;
+    }
+    
+    const selectedPackage = offerings.availablePackages.find(
       pkg => pkg.identifier === packageId
     );
     
     if (selectedPackage) {
+      console.log('✅ Package found:', selectedPackage.identifier, selectedPackage.product.priceString);
       const success = await purchaseSubscription(selectedPackage);
       if (success) {
         setShowSubscriptionModal(false);
       }
+    } else {
+      console.error('❌ Package not found:', packageId);
+      console.log('Available packages:', offerings.availablePackages.map(p => p.identifier));
+      Alert.alert('Error', 'Selected plan is not available. Please try again.');
     }
   };
 
@@ -151,16 +180,7 @@ export default function SettingsScreen() {
     return 0;
   };
 
-  if (!user) {
-    return (
-      <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Please sign in to view settings</Text>
-        </View>
-      </LinearGradient>
-    );
-  }
-
+  // SHOW SETTINGS FOR BOTH AUTHENTICATED AND NON-AUTHENTICATED USERS
   return (
     <>
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
@@ -173,44 +193,60 @@ export default function SettingsScreen() {
           <Text style={styles.subtitle}>Make Dream AI feel like yours</Text>
 
           {/* USER PROFILE SECTION */}
-          <View style={styles.card}>
-            <Text style={styles.section}>Profile</Text>
+          {user ? (
+            <View style={styles.card}>
+              <Text style={styles.section}>Profile</Text>
 
-            {/* Avatar and Name */}
-            <View style={styles.profileSection}>
-              <TouchableOpacity onPress={handleEditAvatar} style={styles.avatarContainer}>
-                {userAvatar ? (
-                  <Image source={{ uri: userAvatar }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Text style={styles.avatarText}>
-                      {user.name?.charAt(0).toUpperCase() || 'U'}
-                    </Text>
+              {/* Avatar and Name */}
+              <View style={styles.profileSection}>
+                <TouchableOpacity onPress={handleEditAvatar} style={styles.avatarContainer}>
+                  {userAvatar ? (
+                    <Image source={{ uri: userAvatar }} style={styles.avatar} />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <Text style={styles.avatarText}>
+                        {user.name?.charAt(0).toUpperCase() || 'U'}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.editBadge}>
+                    <Text style={styles.editBadgeText}>✎</Text>
                   </View>
-                )}
-                <View style={styles.editBadge}>
-                  <Text style={styles.editBadgeText}>✎</Text>
+                </TouchableOpacity>
+                
+                <View style={styles.nameContainer}>
+                  <Text style={styles.displayName}>{user.name || 'User'}</Text>
+                  <Text style={styles.emailText}>{user.email}</Text>
                 </View>
-              </TouchableOpacity>
-              
-              <View style={styles.nameContainer}>
-                <Text style={styles.displayName}>{user.name || 'User'}</Text>
-                <Text style={styles.emailText}>{user.email}</Text>
+              </View>
+
+              {/* Notifications */}
+              <View style={styles.row}>
+                <Text style={styles.rowTitle}>Notifications</Text>
+                <Switch
+                  value={notificationsEnabled}
+                  onValueChange={updateNotifications}
+                  trackColor={{ false: '#E5E7EB', true: '#7278E6' }}
+                  thumbColor={notificationsEnabled ? '#fff' : '#f4f3f4'}
+                  ios_backgroundColor="#E5E7EB"
+                />
               </View>
             </View>
-
-            {/* Notifications */}
-            <View style={styles.row}>
-              <Text style={styles.rowTitle}>Notifications</Text>
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={updateNotifications}
-                trackColor={{ false: '#E5E7EB', true: '#7278E6' }}
-                thumbColor={notificationsEnabled ? '#fff' : '#f4f3f4'}
-                ios_backgroundColor="#E5E7EB"
-              />
-            </View>
-          </View>
+          ) : (
+            // SIGN IN PROMPT CARD FOR NON-AUTHENTICATED USERS
+            <TouchableOpacity onPress={handleSignIn} style={styles.card}>
+              <View style={styles.signInPrompt}>
+                <View style={styles.signInAvatar}>
+                  <Text style={styles.signInAvatarText}>+</Text>
+                </View>
+                <View style={styles.signInTextContainer}>
+                  <Text style={styles.signInTitle}>Sign in to see your profile</Text>
+                  <Text style={styles.signInSubtext}>Save settings & track dreams</Text>
+                </View>
+                <Text style={styles.signInArrow}>›</Text>
+              </View>
+            </TouchableOpacity>
+          )}
 
           {/* SUBSCRIPTION SECTION */}
           <View style={[styles.card, styles.subscriptionCard]}>
@@ -218,7 +254,7 @@ export default function SettingsScreen() {
             
             {isLoadingSubscription ? (
               <ActivityIndicator size="small" color="#7278E6" />
-            ) : subscription ? (
+            ) : user && subscription ? (
               <>
                 <View style={styles.subscriptionInfo}>
                   <View style={styles.planBadge}>
@@ -261,37 +297,59 @@ export default function SettingsScreen() {
             ) : (
               <>
                 <View style={styles.freeAccountInfo}>
-                  <Text style={styles.freeAccountTitle}>No Active Subscription</Text>
+                  <Text style={styles.freeAccountTitle}>
+                    {user ? 'No Active Subscription' : 'Sign in to Subscribe'}
+                  </Text>
                   <Text style={styles.freeAccountSubtext}>
-                    Subscribe to start creating amazing dream videos!
+                    {user 
+                      ? 'Subscribe to start creating amazing dream videos!'
+                      : 'Sign in first to view subscription plans'}
                   </Text>
                 </View>
                 
-                <TouchableOpacity 
-                  style={styles.subscribeButton}
-                  onPress={() => setShowSubscriptionModal(true)}
-                >
-                  <LinearGradient 
-                    colors={['#7278E6', '#9F7AEA']} 
-                    style={styles.subscribeGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <Text style={styles.subscribeButtonText}>View Plans</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+                {user ? (
+                  <>
+                    <TouchableOpacity 
+                      style={styles.subscribeButton}
+                      onPress={() => setShowSubscriptionModal(true)}
+                    >
+                      <LinearGradient 
+                        colors={['#7278E6', '#9F7AEA']} 
+                        style={styles.subscribeGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                      >
+                        <Text style={styles.subscribeButtonText}>View Plans</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
 
-                <TouchableOpacity 
-                  style={styles.restoreButton}
-                  onPress={restorePurchases}
-                >
-                  <Text style={styles.restoreButtonText}>Restore Purchases</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.restoreButton}
+                      onPress={restorePurchases}
+                    >
+                      <Text style={styles.restoreButtonText}>Restore Purchases</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity 
+                    style={styles.subscribeButton}
+                    onPress={handleSignIn}
+                  >
+                    <LinearGradient 
+                      colors={['#7278E6', '#9F7AEA']} 
+                      style={styles.subscribeGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    >
+                      <Text style={styles.subscribeButtonText}>Sign In First</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
 
-          {/* GENERAL SECTION */}
+          {/* GENERAL SECTION - AVAILABLE FOR ALL USERS */}
           <View style={styles.card}>
             <Text style={styles.section}>General</Text>
 
@@ -309,13 +367,15 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* SIGN OUT */}
-          <View style={styles.card}>
-            <TouchableOpacity style={styles.row} onPress={handleSignOut}>
-              <Text style={[styles.rowTitle, { color: '#DC2626' }]}>Sign Out</Text>
-              <Text style={styles.chev}>›</Text>
-            </TouchableOpacity>
-          </View>
+          {/* SIGN OUT - ONLY SHOW IF USER IS SIGNED IN */}
+          {user && (
+            <View style={styles.card}>
+              <TouchableOpacity style={styles.row} onPress={handleSignOut}>
+                <Text style={[styles.rowTitle, { color: '#DC2626' }]}>Sign Out</Text>
+                <Text style={styles.chev}>›</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <Text style={styles.footer}>v1.0 • Made with Dream AI</Text>
         </ScrollView>
@@ -347,7 +407,7 @@ export default function SettingsScreen() {
                   styles.planCard,
                   subscription?.id === 'dream_basic_monthly' && styles.currentPlan
                 ]}
-                onPress={() => handleSelectPlan('dream_basic_monthly')}
+                onPress={() => handleSelectPlan('basic')}
                 disabled={subscription?.id === 'dream_basic_monthly'}
               >
                 <View style={styles.planHeader}>
@@ -373,7 +433,7 @@ export default function SettingsScreen() {
                   styles.recommendedPlan,
                   subscription?.id === 'dream_pro_monthly' && styles.currentPlan
                 ]}
-                onPress={() => handleSelectPlan('dream_pro_monthly')}
+                onPress={() => handleSelectPlan('pro')}
                 disabled={subscription?.id === 'dream_pro_monthly'}
               >
                 <View style={styles.recommendedBadge}>
@@ -402,7 +462,7 @@ export default function SettingsScreen() {
                   styles.planCard,
                   subscription?.id === 'dream_annual' && styles.currentPlan
                 ]}
-                onPress={() => handleSelectPlan('dream_annual')}
+                onPress={() => handleSelectPlan('annual')}
                 disabled={subscription?.id === 'dream_annual'}
               >
                 <View style={styles.savingsBadge}>
@@ -447,6 +507,7 @@ export default function SettingsScreen() {
   );
 }
 
+// ENHANCED STYLES WITH ADDITIONAL ANDROID OPTIMIZATIONS
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -463,19 +524,37 @@ const styles = StyleSheet.create({
   loadingText: {
     color: '#fff',
     fontSize: 18,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    // Add text rendering for Android
+    ...(Platform.OS === 'android' && {
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+    }),
   },
   title: {
     color: '#fff',
     fontSize: 45,
-    fontWeight: '800',
+    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
     paddingHorizontal: 0,
     paddingTop: 4,
     marginBottom: 4,
+    // Enhanced Android text rendering
+    ...(Platform.OS === 'android' && {
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+      letterSpacing: -0.5,
+    }),
   },
   subtitle: {
     color: 'rgba(255,255,255,0.85)',
     marginBottom: 28,
     fontSize: 16,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   card: {
     backgroundColor: '#fff',
@@ -486,15 +565,72 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   section: {
     color: '#0A2540',
-    fontWeight: '800',
+    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
     fontSize: 16,
     opacity: 0.6,
     marginBottom: 16,
     paddingHorizontal: 4,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
+  },
+
+  // SIGN IN PROMPT STYLES FOR NON-AUTHENTICATED USERS
+  signInPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  signInAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+  },
+  signInAvatarText: {
+    fontSize: 28,
+    color: '#9CA3AF',
+    fontWeight: Platform.OS === 'ios' ? '300' : 'normal',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+  },
+  signInTextContainer: {
+    flex: 1,
+  },
+  signInTitle: {
+    fontSize: 18,
+    fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    color: '#0A2540',
+    marginBottom: 4,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
+  },
+  signInSubtext: {
+    fontSize: 14,
+    color: '#68707D',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
+  },
+  signInArrow: {
+    fontSize: 24,
+    color: '#9CA3AF',
+    fontWeight: Platform.OS === 'ios' ? '300' : 'normal',
   },
 
   // PROFILE STYLES
@@ -523,7 +659,8 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#fff',
   },
   editBadge: {
@@ -548,13 +685,22 @@ const styles = StyleSheet.create({
   },
   displayName: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
     marginBottom: 2,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   emailText: {
     fontSize: 14,
     color: '#68707D',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
 
   // SUBSCRIPTION STYLES
@@ -576,13 +722,21 @@ const styles = StyleSheet.create({
   },
   planBadgeText: {
     color: '#fff',
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     fontSize: 14,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   subscriptionPrice: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   usageContainer: {
     backgroundColor: '#F3F4F6',
@@ -599,11 +753,20 @@ const styles = StyleSheet.create({
   usageTitle: {
     fontSize: 14,
     color: '#6B7280',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   usageCount: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   progressBar: {
     height: 8,
@@ -620,6 +783,11 @@ const styles = StyleSheet.create({
   resetText: {
     fontSize: 12,
     color: '#9CA3AF',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   manageButton: {
     borderWidth: 1,
@@ -631,8 +799,12 @@ const styles = StyleSheet.create({
   },
   manageButtonText: {
     color: '#7278E6',
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     fontSize: 16,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   freeAccountInfo: {
     paddingHorizontal: 10,
@@ -640,13 +812,22 @@ const styles = StyleSheet.create({
   },
   freeAccountTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
     marginBottom: 4,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   freeAccountSubtext: {
     fontSize: 14,
     color: '#68707D',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   subscribeButton: {
     marginHorizontal: 10,
@@ -659,8 +840,12 @@ const styles = StyleSheet.create({
   },
   subscribeButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     fontSize: 16,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   restoreButton: {
     alignItems: 'center',
@@ -669,6 +854,11 @@ const styles = StyleSheet.create({
   restoreButtonText: {
     color: '#7278E6',
     fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
 
   // GENERAL STYLES
@@ -681,8 +871,12 @@ const styles = StyleSheet.create({
   },
   rowTitle: { 
     fontSize: 18, 
-    fontWeight: '800', 
-    color: '#0A2540' 
+    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
+    color: '#0A2540',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   chev: { 
     fontSize: 22, 
@@ -695,16 +889,25 @@ const styles = StyleSheet.create({
   currentLanguage: {
     fontSize: 16,
     color: '#7278E6',
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginRight: 8,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   footer: { 
     textAlign: 'center', 
     color: 'rgba(255,255,255,0.85)', 
-    marginTop: 10 
+    marginTop: 10,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
 
-  // MODAL STYLES
+  // MODAL STYLES WITH ANDROID FONT FIXES
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -727,8 +930,12 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   closeButton: {
     padding: 4,
@@ -766,7 +973,11 @@ const styles = StyleSheet.create({
   recommendedText: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   savingsBadge: {
     position: 'absolute',
@@ -780,7 +991,11 @@ const styles = StyleSheet.create({
   savingsText: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   planHeader: {
     flexDirection: 'row',
@@ -790,8 +1005,12 @@ const styles = StyleSheet.create({
   },
   planName: {
     fontSize: 22,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   currentBadge: {
     backgroundColor: '#6B7280',
@@ -802,18 +1021,31 @@ const styles = StyleSheet.create({
   currentBadgeText: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   planPrice: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#7278E6',
     marginBottom: 4,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   planSubtext: {
     fontSize: 14,
     color: '#6B7280',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
     marginBottom: 12,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   planFeatures: {
     marginTop: 12,
@@ -821,7 +1053,12 @@ const styles = StyleSheet.create({
   planFeature: {
     fontSize: 14,
     color: '#4B5563',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
     marginBottom: 6,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   restoreModalButton: {
     alignItems: 'center',
@@ -831,13 +1068,23 @@ const styles = StyleSheet.create({
   restoreModalButtonText: {
     color: '#7278E6',
     fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
     textDecorationLine: 'underline',
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
   legalText: {
     fontSize: 11,
     color: '#9CA3AF',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
     textAlign: 'center',
     marginHorizontal: 20,
     marginBottom: 20,
+    ...(Platform.OS === 'android' && {
+      includeFontPadding: false,
+    }),
   },
 });

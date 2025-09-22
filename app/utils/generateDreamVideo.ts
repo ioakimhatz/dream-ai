@@ -21,29 +21,41 @@ export async function generateDreamVideo(
       console.warn('enhancePrompt failed, using raw text', e);
     }
 
-    console.log('🚀 [DREAM AI] Starting PARALLEL 3-clip cinema generation...');
-    console.log('⚡ Using 3 API keys for 3x faster generation');
-    onProgress?.('Starting parallel dream cinema generation...', 10);
+    console.log('🚀 [DREAM AI] Starting cinema generation...');
+    console.log('⚡ Dream AI Cinema Engine v2.0 - Optimized pipeline');
+    onProgress?.('Dream AI is analyzing your dream...', 10);
     
-    // Generate 3 clips in parallel using 3 API keys (3x faster)
+    // Generate 3 clips in parallel using Dream AI's cinema engine
     const result = await generate3ClipDreamCinemaParallel(
       scenePrompt, 
       selectedImages.length > 0 ? selectedImages[0] : undefined,
       (completed: number, total: number, step: string) => {
-        // Map parallel progress to main progress (10-80%)
+        // Custom progress messages - NO HAILUO BRANDING
+        const progressMessages = [
+          'Dream AI is creating your scenes...',
+          'Rendering dream sequences...',
+          'Applying cinematic effects...',
+          'Processing dream visuals...',
+          'Enhancing dream atmosphere...'
+        ];
+        
+        // Use custom message instead of passed step (which might contain Hailuo)
+        const messageIndex = Math.min(Math.floor(completed), progressMessages.length - 1);
+        const customMessage = progressMessages[messageIndex] || 'Processing your dream...';
+        
         const progress = 10 + (completed / total) * 70;
-        onProgress?.(step, progress);
+        onProgress?.(customMessage, progress);
       }
     );
     
-    onProgress?.('Finalizing your dream cinema...', 90);
+    onProgress?.('Dream AI is finalizing your cinema...', 90);
     
-    console.log('✅ [DREAM AI] PARALLEL dream cinema generation complete!');
-    console.log('🎬 Stitched video URL:', result.stitchedVideoUrl);
+    console.log('✅ [DREAM AI] Cinema generation complete!');
+    console.log('🎬 Dream cinema ready:', result.stitchedVideoUrl);
     console.log('⚡ Generation time:', Math.round(result.generationTime / 1000) + 's');
-    console.log('💰 Total cost: $' + result.totalCost);
+    console.log('💰 Processing cost: $' + result.totalCost);
     
-    onProgress?.('Dream cinema ready!', 100);
+    onProgress?.('Your dream cinema is ready!', 100);
     
     // Return the STITCHED video as the primary video
     return {
@@ -52,18 +64,20 @@ export async function generateDreamVideo(
     };
     
   } catch (err: any) {
-    console.error('❌ [DREAM AI] Error generating parallel dream cinema:', err);
+    console.error('❌ [DREAM AI] Error generating cinema:', err);
     
-    if (err.message?.includes('credits')) {
-      throw new Error('Insufficient credits. Please add credits to your fal.ai accounts.');
-    } else if (err.message?.includes('API key')) {
-      throw new Error('Invalid API keys. Check your .env file configuration.');
-    } else if (err.message?.includes('Cloudinary')) {
-      throw new Error('Video stitching failed. Check your Cloudinary configuration.');
-    } else if (err.message?.includes('parallel')) {
-      throw new Error('Parallel generation failed. One or more API keys may be invalid.');
+    // Clean error messages - no provider branding
+    if (err.message?.includes('credits') || err.message?.includes('insufficient')) {
+      throw new Error('Insufficient Dream AI credits. Please upgrade your plan.');
+    } else if (err.message?.includes('API') || err.message?.includes('key')) {
+      throw new Error('Dream AI configuration error. Please contact support.');
+    } else if (err.message?.includes('Cloudinary') || err.message?.includes('stitch')) {
+      throw new Error('Dream AI processing failed. Please try again.');
+    } else if (err.message?.includes('parallel') || err.message?.includes('timeout')) {
+      throw new Error('Dream AI servers are busy. Please try again in a moment.');
     }
     
-    throw new Error(`Dream generation failed: ${err.message}`);
+    // Generic error - don't expose technical details
+    throw new Error('Dream AI generation failed. Please try again.');
   }
 }

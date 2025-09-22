@@ -1,31 +1,30 @@
-// app/(tabs)/_layout.tsx - WITH AUTH REDIRECT
 import { Ionicons } from '@expo/vector-icons';
-import { Redirect, Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/HapticTab';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { Tabs } from 'expo-router';
+import React, { useEffect } from 'react';
+import { Platform, StatusBar as RNStatusBar } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const { user, isLoading } = useAuth();
+
+  // Fix StatusBar on Android when tabs mount
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      // This fixes the white bars issue on initial load
+      RNStatusBar.setBackgroundColor('transparent');
+      RNStatusBar.setTranslucent(true);
+    }
+  }, []);
 
   // Show nothing while checking auth status
   if (isLoading) {
     return null;
   }
 
-  // Redirect to signin if not authenticated
-  if (!user) {
-    return <Redirect href="/(auth)/signin" />;
-  }
-
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarButton: HapticTab,
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopWidth: 1,
@@ -34,23 +33,35 @@ export default function TabLayout() {
           bottom: 0,
           left: 0,
           right: 0,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 8,
-          paddingBottom: 0,
-          height: 83,
+          ...Platform.select({
+            ios: {
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: -2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+            },
+            android: {
+              elevation: 8,
+            },
+          }),
+          height: Platform.OS === 'android' ? 56 : 83,
+          paddingBottom: Platform.OS === 'android' ? 8 : 0,
+          paddingTop: Platform.OS === 'android' ? 4 : 0,
         },
-        tabBarActiveTintColor: '#7278E6',       
-        tabBarInactiveTintColor: '#9E9E9E',     
+        tabBarActiveTintColor: '#7278E6',
+        tabBarInactiveTintColor: '#9E9E9E',
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: '600',
+          fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+          fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+          marginTop: Platform.OS === 'android' ? -2 : 0,
+          marginBottom: Platform.OS === 'android' ? 4 : 0,
         },
         tabBarIconStyle: {
-          marginTop: 5,
+          marginTop: Platform.OS === 'android' ? 2 : 5,
         },
+        // Prevent lazy loading to avoid white flash
+        lazy: false,
       }}
     >
       <Tabs.Screen
@@ -58,7 +69,11 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color }) => (
-            <Ionicons size={26} name="home-outline" color={color} />
+            <Ionicons 
+              size={Platform.OS === 'android' ? 24 : 26} 
+              name="home-outline" 
+              color={color} 
+            />
           ),
         }}
       />
@@ -66,8 +81,13 @@ export default function TabLayout() {
         name="library"
         options={{
           title: 'Your Dreams',
+          headerShown: false,
           tabBarIcon: ({ color }) => (
-            <Ionicons size={26} name="moon" color={color} />
+            <Ionicons 
+              size={Platform.OS === 'android' ? 24 : 26} 
+              name="moon" 
+              color={color} 
+            />
           ),
         }}
       />
@@ -75,25 +95,30 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: 'Settings',
+          headerShown: false,
           tabBarIcon: ({ color }) => (
-            <Ionicons size={26} name="settings-outline" color={color} />
+            <Ionicons 
+              size={Platform.OS === 'android' ? 24 : 26} 
+              name="settings-outline" 
+              color={color} 
+            />
           ),
         }}
       />
-      
-      {/* HIDDEN TABS - Don't show in tab bar */}
       <Tabs.Screen
         name="profile"
         options={{
-          href: null, // This hides it from the tab bar
+          href: null,
           title: 'Profile',
+          headerShown: false,
         }}
       />
       <Tabs.Screen
         name="privacy-policy"
         options={{
-          href: null, // This hides it from the tab bar
+          href: null,
           title: 'Privacy Policy',
+          headerShown: false,
         }}
       />
     </Tabs>

@@ -11,7 +11,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.ioakimxtz.dreamversefresh",
+      "bundleIdentifier": "com.ioakimxtz.dreamai",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to capture faces for dream videos.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select images.",
@@ -21,20 +22,22 @@
         "googleSignIn": {
           "reservedClientId": "com.googleusercontent.apps.657368542105-1o90lpfe1uo82bcbb22b82kv4rvba9ia"
         }
-      }
+      },
+      "appleTeamId": "P79PBYKHK9"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#7C86FF"
       },
-      "package": "com.ioakimxtz.dreamversefresh",
+      "package": "com.ioakimxtz.dreamai",
       "permissions": [
-        "RECORD_AUDIO",
-        "CAMERA", 
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "com.android.vending.BILLING"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "com.android.vending.BILLING",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "versionCode": 1,
       "jsEngine": "hermes"
@@ -46,6 +49,8 @@
     },
     "plugins": [
       "expo-router",
+      "./modules/video-concatenator/app.plugin.js",
+      "expo-apple-authentication",
       [
         "@react-native-google-signin/google-signin",
         {
@@ -79,7 +84,10 @@
       ],
       "expo-av",
       "expo-secure-store",
-      "expo-image-picker"
+      "expo-image-picker",
+      "expo-font",
+      "expo-web-browser",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

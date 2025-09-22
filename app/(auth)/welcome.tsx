@@ -1,258 +1,231 @@
-// app/(auth)/welcome.tsx - UPDATED WITH CAL AI LAYOUT
-import { LinearGradient } from 'expo-linear-gradient';
+// app/(auth)/welcome.tsx - WITH VIDEO MOCKUP
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
+import { Video, ResizeMode } from 'expo-av';
 import { router } from 'expo-router';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Animated,
+  Dimensions,
+  Platform,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const video = useRef(null);
+  const [status, setStatus] = useState({});
+
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
 
   useEffect(() => {
+    if (!fontsLoaded) return;
+    
+    StatusBar.setBarStyle('dark-content');
+    if (Platform.OS === 'android') {
+      StatusBar.setBackgroundColor('#FFFFFF');
+    }
+    
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 600,
         useNativeDriver: true,
       }),
-      Animated.spring(slideAnim, {
+      Animated.timing(slideAnim, {
         toValue: 0,
-        tension: 40,
-        friction: 8,
+        duration: 600,
         useNativeDriver: true,
       })
     ]).start();
-  }, []);
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
-    <View style={styles.container}>
-      {/* Visual Section - Leave space for your Canva creation */}
-      <Animated.View style={[
-        styles.visualContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }]
-        }
-      ]}>
-        {/* Placeholder for your visual - Replace with your Canva image */}
-        <View style={styles.visualPlaceholder}>
-          {/* Temporary placeholder - DELETE THIS WHEN YOU ADD YOUR IMAGE */}
-          <View style={styles.phoneFrame}>
-            <LinearGradient
-              colors={['#7C86FF', '#E3C8FF']}
-              style={styles.tempGradient}
-            >
-              <Text style={styles.moonIcon}>🌙</Text>
-            </LinearGradient>
-            <View style={styles.scannerCorners}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
+    <View style={styles.safeWrapper}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.innerContainer}>
+          {/* Visual Section - Top 60% */}
+          <Animated.View style={[
+            styles.visualContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}>
+            {/* Video mockup - SMALLER SIZE like Cal AI */}
+            <View style={styles.phoneContainer}>
+              <Video
+                ref={video}
+                style={styles.phoneVideo}
+                source={{
+                  uri: 'https://res.cloudinary.com/dsfqvxje5/video/upload/v1758446232/d8vn6s2ed54zxcazo2dv.mp4',
+                }}
+                useNativeControls={false}
+                resizeMode={ResizeMode.CONTAIN}
+                isLooping
+                shouldPlay
+                onPlaybackStatusUpdate={status => setStatus(() => status)}
+              />
             </View>
-          </View>
-          <Text style={styles.scanText}>• Speak Your Dream</Text>
+          </Animated.View>
+
+          {/* Bottom Section - Bottom 40% */}
+          <Animated.View style={[
+            styles.bottomSection,
+            { opacity: fadeAnim }
+          ]}>
+            {/* Title */}
+            <Text style={styles.title}>
+              Turn dreams into{'\n'}reality
+            </Text>
+
+            {/* Get Started Button */}
+            <TouchableOpacity
+              style={styles.getStartedButton}
+              onPress={() => router.push('/(auth)/onboarding')}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.getStartedText}>Get Started</Text>
+            </TouchableOpacity>
+
+            {/* Sign In Link */}
+            <View style={styles.signInContainer}>
+              <Text style={styles.signInPrompt}>
+                Already have an account?{' '}
+                <Text 
+                  style={styles.signInLink}
+                  onPress={() => router.push('/(auth)/signin')}
+                >
+                  Sign In
+                </Text>
+              </Text>
+            </View>
+          </Animated.View>
         </View>
-
-        {/* When you have your Canva image, use this instead:
-        <Image 
-          source={require('../../assets/images/dream-visual.png')} 
-          style={styles.visualImage}
-          resizeMode="contain"
-        />
-        */}
-      </Animated.View>
-
-      {/* Bottom Section with Content */}
-      <Animated.View style={[
-        styles.bottomSection,
-        { opacity: fadeAnim }
-      ]}>
-        {/* Slogan */}
-        <Text style={styles.slogan}>
-          Dream recording{'\n'}made magical
-        </Text>
-
-        {/* Get Started Button */}
-        <TouchableOpacity
-          style={styles.getStartedButton}
-          onPress={() => router.push('/(auth)/showcase' as any)}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.getStartedText}>Get Started</Text>
-        </TouchableOpacity>
-
-        {/* Sign In Link */}
-        <Text style={styles.signInPrompt}>
-          Already have an account? 
-          <Text 
-            style={styles.signInLink}
-            onPress={() => router.push('/(auth)/signin' as any)}
-          >
-            {' '}Sign In
-          </Text>
-        </Text>
-      </Animated.View>
-
-      {/* Bottom spacer for home indicator */}
-      <View style={styles.bottomSpacer} />
+      </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  safeWrapper: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
 
-  // Visual Section (60% of screen)
+  innerContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+
+  // Visual Section - Balanced like Cal AI
   visualContainer: {
-    flex: 1.2,
-    paddingTop: 60,
-    paddingHorizontal: 20,
+    flex: 1.8,  // Increased even more to make top section bigger
+    paddingTop: 150,  // Massive padding to really push it down
+    alignItems: 'center',
+    justifyContent: 'flex-end',  // Keep at flex-end to align to bottom of container
+    paddingBottom: 13,  // No bottom padding to stay close to title
+    backgroundColor: '#FFFFFF',
+  },
+
+  // Phone container for proper video sizing
+  phoneContainer: {
+    width: width * 1,  // 95% of screen width (bigger)
+    height: height * 0.56,  // Increased height for bigger video
+    maxWidth: 550,  // Increased max width
+    maxHeight: 580,  // Increased max height
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  // Placeholder for visual (DELETE WHEN YOU ADD YOUR IMAGE)
-  visualPlaceholder: {
-    width: width * 0.8,
-    alignItems: 'center',
-  },
-
-  phoneFrame: {
-    width: width * 0.6,
-    height: width * 0.6 * 1.4,
-    backgroundColor: '#000',
-    borderRadius: 30,
-    padding: 3,
-    marginBottom: 20,
-    position: 'relative',
+  // Video styling - matches Cal AI size
+  phoneVideo: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 35,  // Rounded corners for phone mockup effect
     overflow: 'hidden',
   },
 
-  tempGradient: {
-    flex: 1,
-    borderRadius: 27,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  moonIcon: {
-    fontSize: 60,
-  },
-
-  scannerCorners: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-
-  corner: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-
-  topLeft: {
-    top: 20,
-    left: 20,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
-  },
-
-  topRight: {
-    top: 20,
-    right: 20,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
-  },
-
-  bottomLeft: {
-    bottom: 20,
-    left: 20,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-  },
-
-  bottomRight: {
-    bottom: 20,
-    right: 20,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-  },
-
-  scanText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-
-  // When you add your Canva image
-  visualImage: {
-    width: width * 0.85,
-    height: width * 0.85 * 1.2, // Adjust ratio as needed
-    maxHeight: height * 0.45,
-  },
-
-  // Bottom Section (40% of screen)
+  // Bottom Section - Better proportioned
   bottomSection: {
+    flex: 1,
     paddingHorizontal: 24,
-    paddingBottom: 20,
-    alignItems: 'center',
+    paddingBottom: 30,
+    alignItems: 'stretch',
+    justifyContent: 'flex-end',
+    backgroundColor: '#FFFFFF',
   },
 
-  slogan: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#000',
+  // Title with proper spacing
+  title: {
+    fontSize: 36,  // Slightly smaller for balance
+    fontFamily: 'Inter_700Bold',
+    color: '#000000',
     textAlign: 'center',
-    marginBottom: 40,
-    lineHeight: 38,
-    letterSpacing: -0.5,
+    marginBottom: 15,
+    marginTop: -20,  // Much more negative margin to pull closer
+    lineHeight: 46,
+    letterSpacing: 0.5,
   },
 
+  // Purple button - Full width
   getStartedButton: {
-    backgroundColor: '#000',
-    width: '100%',
-    paddingVertical: 18,
-    borderRadius: 14,
+    backgroundColor: '#7E78EA',
+    paddingVertical: 19,
+    paddingHorizontal: 50,
+    borderRadius: 30,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
+    marginHorizontal: 0,
+    width: '100%',
   },
 
   getStartedText: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
     color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+
+  // Sign in section
+  signInContainer: {
+    paddingTop: 0,
+    paddingBottom: 10,
+    alignItems: 'center',
   },
 
   signInPrompt: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: 17,
+    fontFamily: 'Inter_400Regular',
+    color: '#666666',
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
 
   signInLink: {
-    color: '#000',
-    fontWeight: '700',
-  },
-
-  bottomSpacer: {
-    height: 34, // For iPhone home indicator
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000000',
+    letterSpacing: 0.3,
   },
 });

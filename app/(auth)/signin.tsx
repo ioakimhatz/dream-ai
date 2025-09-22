@@ -1,37 +1,145 @@
-// app/(auth)/signin.tsx - RETURNING USER
-// ============================================
+// app/(auth)/signin.tsx - SIGN IN WITH APPLE + GOOGLE AUTH
+import { Inter_400Regular, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
+import { Ionicons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { router } from 'expo-router';
 import React from 'react';
 import {
+  Image,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function SignInScreen() {
+  const { signInWithGoogle, isLoading } = useAuth();
+  
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
+  const handleAppleSignIn = async () => {
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      // Handle the Apple credential
+      console.log('Apple Sign-In Success:', {
+        user: credential.user,
+        email: credential.email,
+        fullName: credential.fullName,
+        identityToken: credential.identityToken,
+        authorizationCode: credential.authorizationCode,
+      });
+      
+      // TODO: Send credential to your backend or save to your auth context
+      // For now, navigate to home
+      router.replace('/(tabs)/home');
+      
+    } catch (e: any) {
+      if (e.code === 'ERR_CANCELED') {
+        console.log('User canceled Apple Sign-In');
+      } else {
+        console.error('Apple Sign-In failed:', e);
+      }
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      // Navigation will be handled by auth state change in _layout.tsx
+    } catch (error) {
+      console.error('Google sign-in failed:', error);
+    }
+  };
+
+  const handleEmailSignIn = () => {
+    router.push('/(auth)/email-entry');
+  };
+
+  const handleClose = () => {
+    router.back();
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <TouchableOpacity 
-        style={styles.closeButton}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.closeText}>×</Text>
-      </TouchableOpacity>
+      {/* Header with title and close button */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Sign In</Text>
+        <TouchableOpacity 
+          style={styles.closeButton}
+          onPress={handleClose}
+        >
+          <Ionicons name="close" size={28} color="#999" />
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.content}>
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>
-          Sign in to continue your dream journey
-        </Text>
+        {/* Sign in buttons */}
+        <View style={styles.buttonContainer}>
+          {/* Apple Sign In - Only show on iOS */}
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity
+              style={[styles.appleButton, isLoading && styles.buttonDisabled]}
+              onPress={handleAppleSignIn}
+              activeOpacity={0.9}
+              disabled={isLoading}
+            >
+              <Ionicons name="logo-apple" size={20} color="#FFFFFF" />
+              <Text style={styles.appleText}>Sign in with Apple</Text>
+            </TouchableOpacity>
+          )}
 
-        <TouchableOpacity
-          style={styles.emailButton}
-          onPress={() => router.push('/(auth)/email-entry' as any)}
-        >
-          <Text style={styles.emailButtonText}>Sign in with email</Text>
-        </TouchableOpacity>
+          {/* Google Sign In - Shows on both platforms */}
+          <TouchableOpacity
+            style={[styles.googleButton, isLoading && styles.buttonDisabled]}
+            onPress={handleGoogleSignIn}
+            activeOpacity={0.8}
+            disabled={isLoading}
+          >
+            <Image 
+              source={require('../../assets/images/google-logo.png')}
+              style={styles.googleLogo}
+              resizeMode="contain"
+            />
+            <Text style={styles.googleText}>
+              {isLoading ? 'Signing in...' : 'Sign in with Google'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Email Sign In - Shows on both platforms */}
+          <TouchableOpacity
+            style={[styles.emailButton, isLoading && styles.buttonDisabled]}
+            onPress={handleEmailSignIn}
+            activeOpacity={0.8}
+            disabled={isLoading}
+          >
+            <Ionicons name="mail-outline" size={20} color="#000" />
+            <Text style={styles.emailText}>Continue with email</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Terms and Privacy */}
+        <Text style={styles.terms}>
+          By continuing you agree to Dream AI's{'\n'}
+          <Text style={styles.termsLink}>Terms and Conditions</Text> and{' '}
+          <Text style={styles.termsLink}>Privacy Policy</Text>
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -42,47 +150,106 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  closeButton: {
-    position: 'absolute',
-    top: 60,
-    right: 24,
-    zIndex: 10,
-    width: 32,
-    height: 32,
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 10,
+    position: 'relative',
   },
-  closeText: {
-    fontSize: 32,
-    color: '#86868B',
+  title: {
+    fontSize: 28,
+    fontFamily: 'Inter_700Bold',
+    color: '#000',
+    letterSpacing: -0.5,
+  },
+  closeButton: {
+    position: 'absolute',
+    right: 24,
+    padding: 4,
   },
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 120,
+    justifyContent: 'center',
+    marginTop: -60,
+  },
+  buttonContainer: {
+    marginBottom: 40,
+  },
+  // Apple button - black
+  appleButton: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000000',
+    paddingVertical: 19,
+    borderRadius: 30,
+    marginBottom: 16,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#000',
-    marginBottom: 12,
+  appleText: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFFFFF',
+    marginLeft: 10,
+    letterSpacing: -0.3,
   },
-  subtitle: {
-    fontSize: 17,
-    color: '#86868B',
-    marginBottom: 50,
-    textAlign: 'center',
-  },
-  emailButton: {
-    backgroundColor: '#F5F5F7',
+  // Google button - white with border
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
     paddingVertical: 18,
-    paddingHorizontal: 32,
-    borderRadius: 14,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    marginBottom: 16,
   },
-  emailButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
+  googleLogo: {
+    width: 20,
+    height: 20,
+    marginRight: 10,
+  },
+  googleText: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000',
+    letterSpacing: -0.3,
+  },
+  // Email button - white with border
+  emailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 18,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+  },
+  emailText: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000',
+    marginLeft: 10,
+    letterSpacing: -0.3,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  // Terms
+  terms: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  termsLink: {
+    textDecorationLine: 'underline',
     color: '#000',
   },
 });

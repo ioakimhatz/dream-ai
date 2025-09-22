@@ -1,37 +1,47 @@
-// app/(auth)/email-entry.tsx - OTP REQUEST
-// ============================================
-import { LinearGradient } from 'expo-linear-gradient';
+// app/(auth)/email-entry.tsx - EMAIL ENTRY WITH EMAILJS
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function EmailEntryScreen() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { sendOTP } = useAuth();
 
   const handleSendOTP = async () => {
-    if (!email || !email.includes('@')) return;
+    if (!email || !email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
 
     setIsLoading(true);
     try {
-      // Send OTP to email
-      // await sendOTPEmail(email);
+      // Send OTP using EmailJS through AuthContext
+      const success = await sendOTP(email);
       
-      router.push({
-        pathname: '/(auth)/verify-otp',
-        params: { email }
-      });
+      if (success) {
+        // Navigate to verification screen
+        router.push({
+          pathname: '/(auth)/verify-otp',
+          params: { email }
+        });
+      } else {
+        Alert.alert('Error', 'Failed to send verification code. Please try again.');
+      }
     } catch (error) {
       console.error('Failed to send OTP:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -53,7 +63,7 @@ export default function EmailEntryScreen() {
         <View style={styles.content}>
           <Text style={styles.title}>Enter your email</Text>
           <Text style={styles.subtitle}>
-            We'll send you a code to sign in
+            We'll send you a 4-digit code to sign in
           </Text>
 
           <TextInput
@@ -70,25 +80,25 @@ export default function EmailEntryScreen() {
           />
 
           <TouchableOpacity
-            style={styles.continueButton}
+            style={[
+              styles.continueButton,
+              (!email || isLoading) && styles.buttonDisabled
+            ]}
             onPress={handleSendOTP}
             disabled={!email || isLoading}
             activeOpacity={0.8}
           >
-            <LinearGradient
-              colors={email && !isLoading ? ['#7278E6', '#E879F9'] : ['#E5E5E7', '#E5E5E7']}
-              style={styles.buttonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={[
-                styles.buttonText,
-                (!email || isLoading) && styles.buttonTextDisabled
-              ]}>
-                {isLoading ? 'Sending...' : 'Send Code'}
-              </Text>
-            </LinearGradient>
+            <Text style={[
+              styles.buttonText,
+              (!email || isLoading) && styles.buttonTextDisabled
+            ]}>
+              {isLoading ? 'Sending...' : 'Send Code'}
+            </Text>
           </TouchableOpacity>
+
+          <Text style={styles.infoText}>
+            Powered by Dream AI's secure email verification
+          </Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -137,12 +147,14 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   continueButton: {
-    marginBottom: 20,
-  },
-  buttonGradient: {
+    backgroundColor: '#7E78EA', // DREAM AI PURPLE
     paddingVertical: 18,
     borderRadius: 14,
     alignItems: 'center',
+    marginBottom: 20,
+  },
+  buttonDisabled: {
+    backgroundColor: '#E5E5E7',
   },
   buttonText: {
     fontSize: 17,
@@ -151,5 +163,11 @@ const styles = StyleSheet.create({
   },
   buttonTextDisabled: {
     color: '#86868B',
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#86868B',
+    textAlign: 'center',
+    marginTop: 20,
   },
 });
