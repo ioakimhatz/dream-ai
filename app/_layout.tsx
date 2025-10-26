@@ -1,3 +1,4 @@
+// app/_layout.tsx
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { useFonts } from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,10 +9,10 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Purchases from 'react-native-purchases';
+
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 function AppContent() {
@@ -21,69 +22,68 @@ function AppContent() {
   const router = useRouter();
   const segments = useSegments();
 
-  // Check if user has completed onboarding
+  // 🔍 DEBUG LOGS - CHECK THESE IN CONSOLE!
+  useEffect(() => {
+    console.log('🔍 ============ APP STATE DEBUG ============');
+    console.log('🔍 AUTH LOADING:', isLoading);
+    console.log('🔍 CHECKING ONBOARDING:', checkingOnboarding);
+    console.log('🔍 USER:', user?.id || 'NO USER');
+    console.log('🔍 HAS SEEN ONBOARDING:', hasSeenOnboarding);
+    console.log('🔍 CURRENT SEGMENTS:', segments);
+    console.log('🔍 =========================================');
+  }, [isLoading, checkingOnboarding, user, hasSeenOnboarding, segments]);
+
   useEffect(() => {
     const checkOnboardingStatus = async () => {
       try {
+        console.log('📋 Checking onboarding status...');
         const hasCompleted = await AsyncStorage.getItem('hasCompletedOnboarding');
+        console.log('📋 Onboarding completed:', hasCompleted);
+        
         setHasSeenOnboarding(hasCompleted === 'true');
         setCheckingOnboarding(false);
-        
-        // Navigate to welcome if first time
+
         if (hasCompleted !== 'true' && segments[0] !== '(auth)') {
+          console.log('➡️ Navigating to welcome screen');
           router.replace('/(auth)/welcome');
         } else if (hasCompleted === 'true' && segments[0] === '(auth)') {
-          // If onboarding is complete but we're still in auth, go to home
+          console.log('➡️ Navigating to tabs');
           router.replace('/(tabs)');
         }
       } catch (error) {
-        console.error('Error checking onboarding status:', error);
+        console.error('❌ Error checking onboarding status:', error);
         setCheckingOnboarding(false);
-        // Default to showing onboarding on error
         router.replace('/(auth)/welcome');
       }
     };
-
     checkOnboardingStatus();
   }, []);
 
-  // Initialize RevenueCat with CORRECT PUBLIC KEY
   useEffect(() => {
     const initializeRevenueCat = async () => {
       try {
+        console.log('💰 Initializing RevenueCat...');
         if (Platform.OS === 'android') {
-          // Android configuration with PUBLIC KEY (not secret key!)
-          await Purchases.configure({
-            apiKey: '***REMOVED***' // Your PUBLIC Google SDK key
-          });
+          await Purchases.configure({ apiKey: '***REMOVED***' });
         } else if (Platform.OS === 'ios') {
-          // iOS configuration - add this when you have Apple Developer account
-          // await Purchases.configure({
-          //   apiKey: 'appl_YOUR_IOS_PUBLIC_KEY' // Will look like appl_xxxxx
-          // });
+          await Purchases.configure({ apiKey: 'appl_vRUwRfxjglNcNpuBpAOGxFSKohU' });
         }
-
-        // Optional: Set user ID if you have one from your auth system
-        if (user?.uid) {
-          await Purchases.logIn(user.uid);
+        const rcId = user?.id ?? null;
+        if (rcId) {
+          console.log('💰 Logging into RevenueCat with user:', rcId);
+          await Purchases.logIn(rcId);
         }
-
-        // Enable debug logs in development
-        if (__DEV__) {
-          Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
-        }
-
-        console.log('RevenueCat initialized successfully');
+        if (__DEV__) Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
+        console.log('✅ RevenueCat initialized successfully');
       } catch (error) {
-        console.error('Error initializing RevenueCat:', error);
+        console.error('❌ Error initializing RevenueCat:', error);
       }
     };
-
     initializeRevenueCat();
   }, [user]);
 
-  // Show loading while checking onboarding status
   if (isLoading || checkingOnboarding) {
+    console.log('⏳ SHOWING LOADING SCREEN - isLoading:', isLoading, 'checkingOnboarding:', checkingOnboarding);
     return (
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
         <StatusBar style="light" translucent backgroundColor="transparent" />
@@ -94,41 +94,21 @@ function AppContent() {
     );
   }
 
+  console.log('✅ RENDERING MAIN APP CONTENT');
   return (
     <DreamUsageProvider>
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: 'transparent' },
+          contentStyle: { backgroundColor: '#FFFFFF' },
           animation: 'fade',
         }}
-        initialRouteName={hasSeenOnboarding ? "(tabs)" : "(auth)"}
+        initialRouteName={hasSeenOnboarding ? '(tabs)' : '(auth)'}
       >
-        {/* Show auth screens for onboarding/signin flow */}
-        <Stack.Screen 
-          name="(auth)" 
-          options={{
-            animation: 'slide_from_right',
-          }}
-        />
-        
-        {/* Main app tabs - accessible after onboarding */}
-        <Stack.Screen 
-          name="(tabs)" 
-          options={{
-            animation: 'fade',
-          }}
-        />
-        
-        {/* Other screens */}
+        <Stack.Screen name="(auth)" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
         <Stack.Screen name="+not-found" />
-        <Stack.Screen 
-          name="privacy-policy" 
-          options={{ 
-            title: 'Privacy Policy',
-            presentation: 'modal' 
-          }} 
-        />
+        <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy', presentation: 'modal' }} />
       </Stack>
     </DreamUsageProvider>
   );
@@ -140,10 +120,11 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    // Initialize Google Sign-In
     if (Platform.OS !== 'web') {
+      console.log('🔐 Configuring Google Sign In...');
       GoogleSignin.configure({
-        webClientId: '657368542105-rljuhdohnubivd068c6gclnhlfep06h7.apps.googleusercontent.com',
+        webClientId: '967701675568-0dj67qpsco2fr244m0tajvvnnu42c730.apps.googleusercontent.com',
+        iosClientId: '967701675568-ipr1qtc009migtvem6nce0poq213ic6q.apps.googleusercontent.com',
         offlineAccess: true,
       });
     }
@@ -151,14 +132,17 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
+      console.log('✅ Fonts loaded, hiding splash screen');
       SplashScreen.hideAsync();
     }
   }, [loaded]);
 
   if (!loaded) {
+    console.log('⏳ Waiting for fonts to load...');
     return null;
   }
 
+  console.log('✅ Fonts loaded, rendering AuthProvider');
   return (
     <AuthProvider>
       <AppContent />

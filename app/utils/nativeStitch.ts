@@ -1,18 +1,15 @@
-import { Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
 import { concatenateVideos } from '../../modules/video-concatenator/src';
+import * as FileSystem from 'expo-file-system';
 
-export async function stitchWithNative(videoUrls: string[]) {
-  if (Platform.OS !== 'ios') throw new Error('Native stitch only on iOS for now');
+export async function stitchNative(localUris: string[]): Promise<string> {
+  if (localUris.length < 2) throw new Error('Need at least 2 clips');
+  const outputName = `dream_cinema_${Date.now()}`;
+  const path = await concatenateVideos(localUris, outputName); // returns absolute path w/o file://
+  const fileUrl = `file://${path}`;
 
-  try {
-    const name = `dream_cinema_${Date.now()}`;
-    const out = await concatenateVideos(videoUrls, name);
-    const info = await FileSystem.getInfoAsync(out.startsWith('file://') ? out : `file://${out}`);
-    if (!info.exists || (info.size ?? 0) === 0) throw new Error('Empty output');
-    return out.startsWith('file://') ? out : `file://${out}`;
-  } catch (e) {
-    // Let caller fall back to Cloudinary
-    throw e;
+  const info = await FileSystem.getInfoAsync(fileUrl);
+  if (!info.exists || (info.size ?? 0) === 0) {
+    throw new Error('Native export created an empty file');
   }
+  return fileUrl;
 }

@@ -1,4 +1,5 @@
-// app/(tabs)/settings.tsx - FIXED WITH CORRECT REVENUCAT PACKAGE IDS
+// app/(tabs)/settings.tsx - FIXED WITH SUBSCRIPTION REFRESH
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,159 +9,331 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 
+const LANGUAGES = [
+  { code: 'en', name: 'English', flag: '🇬🇧' },
+  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
+  { code: 'fr', name: 'French', flag: '🇫🇷' },
+  { code: 'de', name: 'German', flag: '🇩🇪' },
+  { code: 'it', name: 'Italian', flag: '🇮🇹' },
+  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
+  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
+  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
+  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
+  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
+  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
+  { code: 'hi', name: 'Hindi', flag: '🇮🇳' },
+  { code: 'nl', name: 'Dutch', flag: '🇳🇱' },
+  { code: 'pl', name: 'Polish', flag: '🇵🇱' },
+  { code: 'tr', name: 'Turkish', flag: '🇹🇷' },
+  { code: 'sv', name: 'Swedish', flag: '🇸🇪' },
+  { code: 'no', name: 'Norwegian', flag: '🇳🇴' },
+  { code: 'da', name: 'Danish', flag: '🇩🇰' },
+  { code: 'fi', name: 'Finnish', flag: '🇫🇮' },
+  { code: 'el', name: 'Greek', flag: '🇬🇷' },
+  { code: 'cs', name: 'Czech', flag: '🇨🇿' },
+  { code: 'hu', name: 'Hungarian', flag: '🇭🇺' },
+  { code: 'ro', name: 'Romanian', flag: '🇷🇴' },
+  { code: 'th', name: 'Thai', flag: '🇹🇭' },
+  { code: 'vi', name: 'Vietnamese', flag: '🇻🇳' },
+  { code: 'id', name: 'Indonesian', flag: '🇮🇩' },
+  { code: 'uk', name: 'Ukrainian', flag: '🇺🇦' },
+  { code: 'he', name: 'Hebrew', flag: '🇮🇱' },
+];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<string | null>(null);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-  
-  const { user, signOut } = useAuth();
-  const { 
-    dreamUsage, 
-    subscription, 
+  const [showEditNameModal, setShowEditNameModal] = useState(false);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [tempName, setTempName] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
+
+  const { user, signOut, updateUserName } = useAuth();
+  const {
+    dreamUsage,
+    subscription,
     offerings,
     isLoadingSubscription,
     purchaseSubscription,
-    restorePurchases 
+    restorePurchases,
+    refreshSubscriptionStatus,  // ✅ ADDED
   } = useDreamUsage();
 
-  // Load settings on mount
   useEffect(() => {
-    loadSettings();
+    (async () => {
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        setNotificationPermissionStatus(status);
+        
+        const saved = await AsyncStorage.getItem('notifications');
+        if (saved !== null) {
+          setNotificationsEnabled(JSON.parse(saved));
+        }
+        
+        const savedLanguage = await AsyncStorage.getItem('language');
+        if (savedLanguage) {
+          setSelectedLanguage(savedLanguage);
+        }
+      } catch (e) {
+        console.error('Failed to load settings:', e);
+      }
+    })();
   }, []);
 
-  // Load user data from auth context
   useEffect(() => {
-    if (user?.photo) {
-      setUserAvatar(user.photo);
-    }
+    if (user?.photo) setUserAvatar(user.photo);
   }, [user]);
-
-  const loadSettings = async () => {
-    try {
-      const savedNotifications = await AsyncStorage.getItem('notifications');
-      if (savedNotifications !== null) {
-        setNotificationsEnabled(JSON.parse(savedNotifications));
-      }
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-    }
-  };
 
   const updateNotifications = async (value: boolean) => {
     try {
-      setNotificationsEnabled(value);
-      await AsyncStorage.setItem('notifications', JSON.stringify(value));
-    } catch (error) {
-      console.error('Failed to save notifications setting:', error);
-      Alert.alert('Error', 'Failed to save notification setting');
+      if (value) {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        
+        if (finalStatus !== 'granted') {
+          Alert.alert(
+            'Permission Required',
+            'Please enable notifications in your device settings to receive dream reminders.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() }
+            ]
+          );
+          return;
+        }
+        
+        setNotificationPermissionStatus(finalStatus);
+        setNotificationsEnabled(true);
+        await AsyncStorage.setItem('notifications', JSON.stringify(true));
+        
+        await Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+            shouldSetBadge: true,
+          }),
+        });
+        
+        // ✅ No alert needed - toggle feedback is enough
+      } else {
+        setNotificationsEnabled(false);
+        await AsyncStorage.setItem('notifications', JSON.stringify(false));
+      }
+    } catch (e) {
+      console.error('Failed to update notifications:', e);
+      Alert.alert('Error', 'Failed to update notification settings');
+    }
+  };
+
+  const handleLanguageSelect = async (languageCode: string) => {
+    try {
+      setSelectedLanguage(languageCode);
+      await AsyncStorage.setItem('language', languageCode);
+      setShowLanguageModal(false);
+      
+      // ✅ No alert needed - visual selection feedback is enough
+    } catch (e) {
+      console.error('Failed to save language:', e);
+      Alert.alert('Error', 'Failed to update language');
     }
   };
 
   const handleLanguagePress = () => {
-    Alert.alert(
-      'Language Settings',
-      'Language selection is available in the voice recording dropdown on the Home screen.',
-      [{ text: 'OK' }]
-    );
+    setShowLanguageModal(true);
   };
 
-  const handlePrivacyPress = () => {
-    router.push('/privacy-policy');
-  };
+  const handlePrivacyPress = () => router.push('/privacy-policy');
+
+  const handleTermsPress = () => router.push('/terms-of-service');
 
   const handleEditAvatar = async () => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (!permissionResult.granted) {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
         Alert.alert('Permission needed', 'Please allow access to your photo library.');
         return;
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
-
       if (!result.canceled && result.assets[0]) {
         setUserAvatar(result.assets[0].uri);
-        console.log('Avatar updated:', result.assets[0].uri);
       }
-    } catch (error) {
-      console.error('Error selecting avatar:', error);
+    } catch (e) {
+      console.error('Error selecting avatar:', e);
       Alert.alert('Error', 'Failed to select image. Please try again.');
     }
   };
 
-  const handleSignOut = () => {
+  const handleEditName = () => {
+    setTempName(user?.name || '');
+    setShowEditNameModal(true);
+  };
+
+  const handleSaveName = async () => {
+    if (!tempName.trim()) {
+      Alert.alert('Error', 'Name cannot be empty');
+      return;
+    }
+    
+    await updateUserName(tempName.trim());
+    setShowEditNameModal(false);
+    // ✅ No alert needed - modal closing is feedback enough
+  };
+
+  const handleSignOut = () =>
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: signOut },
+    ]);
+
+  const handleDeleteAccount = () => {
     Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
+      'Delete Account',
+      'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Sign Out', 
+          text: 'Delete', 
           style: 'destructive', 
-          onPress: signOut
-        }
+          onPress: async () => {
+            try {
+              // 🔥 ACCOUNT DELETION LOGIC
+              console.log('🗑️ Starting account deletion...');
+              
+              // 1. Clear ALL user data from AsyncStorage
+              const keysToRemove = [
+                'user',
+                'hasCompletedOnboarding',
+                'notifications',
+                'language',
+                'temp_otp',
+                'temp_otp_email',
+                'temp_otp_expires',
+                // Add any other keys your app uses
+              ];
+              
+              await AsyncStorage.multiRemove(keysToRemove);
+              console.log('✅ All user data removed from storage');
+              
+              // 2. If you have a backend API, call it here to delete server-side data
+              // Example:
+              // if (user?.id) {
+              //   await fetch(`https://your-api.com/users/${user.id}`, {
+              //     method: 'DELETE',
+              //   });
+              // }
+              
+              // 3. Sign out from Google if they signed in with Google
+              try {
+                const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+                if (await GoogleSignin.isSignedIn()) {
+                  await GoogleSignin.signOut();
+                  console.log('✅ Signed out from Google');
+                }
+              } catch (e) {
+                console.log('No Google sign-in to clear');
+              }
+              
+              // 4. Redirect to welcome screen
+              router.replace('/welcome');
+              
+              // 5. Show success message
+              Alert.alert(
+                'Account Deleted',
+                'Your account and all associated data have been permanently deleted. We\'re sad to see you go!',
+                [{ text: 'OK' }]
+              );
+              
+              console.log('✅ Account deletion complete');
+            } catch (error) {
+              console.error('❌ Account deletion error:', error);
+              Alert.alert(
+                'Error',
+                'Failed to delete account. Please try again or contact support.',
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        },
       ]
     );
   };
 
-  const handleSignIn = () => {
-    router.push('/(auth)/signin');
-  };
+  const handleSignIn = () => router.push('/(auth)/signin');
 
-  // FIXED: Map UI plan names to RevenueCat package identifiers
-  const handleSelectPlan = async (planType: 'basic' | 'pro' | 'annual') => {
-    console.log('🎯 Plan selected:', planType);
-    
-    // Map plan types to RevenueCat package identifiers
-    const packageIdMap: Record<string, string> = {
-      'basic': '$rc_monthly',    // Basic Monthly
-      'pro': 'Monthly',          // Pro Monthly (custom identifier)
-      'annual': '$rc_annual'     // Annual
+  // ✅ FIXED FUNCTION WITH REFRESH
+  const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
+    const productMap: Record<string, string> = { 
+      weekly: 'dream_weekly', 
+      basic: 'dream_basic_monthly', 
+      pro: 'dream_pro_monthly' 
     };
     
-    const packageId = packageIdMap[planType];
-    console.log('📦 Looking for package:', packageId);
+    const productId = productMap[planType];
     
     if (!offerings?.availablePackages) {
-      console.error('❌ No offerings available');
       Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
       return;
     }
     
-    const selectedPackage = offerings.availablePackages.find(
-      pkg => pkg.identifier === packageId
+    console.log('💳 [Settings] Looking for product ID:', productId);
+    console.log('💳 [Settings] Available packages:', offerings.availablePackages.map(p => ({
+      identifier: p.identifier,
+      productId: p.product.identifier
+    })));
+    
+    const packageToPurchase = offerings.availablePackages.find(
+      (p) => p.product.identifier === productId
     );
     
-    if (selectedPackage) {
-      console.log('✅ Package found:', selectedPackage.identifier, selectedPackage.product.priceString);
-      const success = await purchaseSubscription(selectedPackage);
-      if (success) {
-        setShowSubscriptionModal(false);
-      }
-    } else {
-      console.error('❌ Package not found:', packageId);
-      console.log('Available packages:', offerings.availablePackages.map(p => p.identifier));
+    if (!packageToPurchase) {
       Alert.alert('Error', 'Selected plan is not available. Please try again.');
+      return;
+    }
+    
+    console.log('✅ [Settings] Found package:', packageToPurchase.identifier);
+    
+    // ⚡ CRITICAL FIX: Close modal IMMEDIATELY for instant UX!
+    setShowSubscriptionModal(false);
+    
+    // Then process purchase in background
+    const success = await purchaseSubscription(packageToPurchase);
+    
+    if (success) {
+      // ✅ REFRESH SUBSCRIPTION STATUS!
+      await refreshSubscriptionStatus();
     }
   };
 
@@ -168,38 +341,70 @@ export default function SettingsScreen() {
     const resetDate = new Date(dreamUsage.resetDate);
     const now = new Date();
     
-    if (subscription?.period === 'monthly') {
-      // Calculate next month reset
-      const nextReset = new Date(resetDate);
-      nextReset.setMonth(nextReset.getMonth() + 1);
-      const diff = nextReset.getTime() - now.getTime();
-      const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-      return days > 0 ? days : 0;
-    }
-    
-    return 0;
+    // ✅ FIX #2: resetDate is already the NEXT reset date - just calculate difference
+    const days = Math.ceil((resetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return days > 0 ? days : 0;
   };
 
-  // SHOW SETTINGS FOR BOTH AUTHENTICATED AND NON-AUTHENTICATED USERS
+  const getCurrentLanguageName = () => {
+    return LANGUAGES.find(l => l.code === selectedLanguage)?.name || 'English';
+  };
+
+  const getDisplayName = () => {
+    if (!user) return 'Tap to set name';
+    
+    if (
+      !user.name ||
+      user.name === 'User' ||
+      user.name === 'Apple User' ||
+      user.name.length > 30 ||
+      user.name.includes('.eba') ||
+      user.name.includes('.403')
+    ) {
+      return 'Tap to set name';
+    }
+    
+    return user.name;
+  };
+
+  const getDisplayEmail = () => {
+    if (!user) return 'and username';
+    
+    if (user.email.includes('privaterelay.appleid.com') || user.email.length > 50) {
+      return 'and username';
+    }
+    
+    return user.email;
+  };
+
   return (
     <>
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
-        <ScrollView 
-          style={[styles.container, { paddingTop: insets.top }]} 
-          contentContainerStyle={styles.content}
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: insets.top + 16,
+            paddingBottom: insets.bottom + 28
+          }}
+          contentInsetAdjustmentBehavior="never"
           showsVerticalScrollIndicator={false}
+          bounces={Platform.OS === 'ios'}
+          alwaysBounceVertical={Platform.OS === 'ios'}
+          overScrollMode={Platform.OS === 'android' ? 'never' : 'always'}
+          decelerationRate={Platform.OS === 'ios' ? 'fast' : 'normal'}
+          scrollEventThrottle={16}
+          keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.title}>Settings</Text>
           <Text style={styles.subtitle}>Make Dream AI feel like yours</Text>
 
-          {/* USER PROFILE SECTION */}
           {user ? (
             <View style={styles.card}>
               <Text style={styles.section}>Profile</Text>
 
-              {/* Avatar and Name */}
-              <View style={styles.profileSection}>
-                <TouchableOpacity onPress={handleEditAvatar} style={styles.avatarContainer}>
+              <TouchableOpacity onPress={handleEditName} style={styles.profileSection} activeOpacity={0.7}>
+                <View style={styles.avatarContainer}>
                   {userAvatar ? (
                     <Image source={{ uri: userAvatar }} style={styles.avatar} />
                   ) : (
@@ -209,18 +414,23 @@ export default function SettingsScreen() {
                       </Text>
                     </View>
                   )}
-                  <View style={styles.editBadge}>
+                  <TouchableOpacity 
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleEditAvatar();
+                    }} 
+                    style={styles.editBadge}
+                  >
                     <Text style={styles.editBadgeText}>✎</Text>
-                  </View>
-                </TouchableOpacity>
-                
-                <View style={styles.nameContainer}>
-                  <Text style={styles.displayName}>{user.name || 'User'}</Text>
-                  <Text style={styles.emailText}>{user.email}</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
 
-              {/* Notifications */}
+                <View style={styles.nameContainer}>
+                  <Text style={styles.tapToSetText}>{getDisplayName()}</Text>
+                  <Text style={styles.tapToSetSubtext}>{getDisplayEmail()}</Text>
+                </View>
+              </TouchableOpacity>
+
               <View style={styles.row}>
                 <Text style={styles.rowTitle}>Notifications</Text>
                 <Switch
@@ -233,7 +443,6 @@ export default function SettingsScreen() {
               </View>
             </View>
           ) : (
-            // SIGN IN PROMPT CARD FOR NON-AUTHENTICATED USERS
             <TouchableOpacity onPress={handleSignIn} style={styles.card}>
               <View style={styles.signInPrompt}>
                 <View style={styles.signInAvatar}>
@@ -248,46 +457,48 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           )}
 
-          {/* SUBSCRIPTION SECTION */}
           <View style={[styles.card, styles.subscriptionCard]}>
             <Text style={styles.section}>Subscription</Text>
-            
+
             {isLoadingSubscription ? (
               <ActivityIndicator size="small" color="#7278E6" />
             ) : user && subscription ? (
               <>
-                <View style={styles.subscriptionInfo}>
-                  <View style={styles.planBadge}>
-                    <Text style={styles.planBadgeText}>{subscription.name}</Text>
-                  </View>
-                  <Text style={styles.subscriptionPrice}>{subscription.price}</Text>
+                {/* ✅ FIX #3: Plan Name on LEFT */}
+                <View style={styles.planBadge}>
+                  <Text style={styles.planBadgeText}>{subscription.name}</Text>
                 </View>
 
                 <View style={styles.usageContainer}>
-                  <View style={styles.usageHeader}>
-                    <Text style={styles.usageTitle}>Dreams Used</Text>
-                    <Text style={styles.usageCount}>
-                      {dreamUsage.used} / {dreamUsage.total}
+                  {/* Dreams Remaining - BIG and CENTERED */}
+                  <View style={styles.dreamsRemainingContainer}>
+                    <Text style={styles.dreamsRemainingBig}>
+                      {dreamUsage.total - dreamUsage.used}
+                    </Text>
+                    <Text style={styles.dreamsRemainingLabel}>
+                      dream{(dreamUsage.total - dreamUsage.used) !== 1 ? 's' : ''} remaining
                     </Text>
                   </View>
-                  
+
+                  {/* Progress Bar */}
                   <View style={styles.progressBar}>
-                    <View 
+                    <View
                       style={[
-                        styles.progressFill, 
-                        { width: `${(dreamUsage.used / dreamUsage.total) * 100}%` }
-                      ]} 
+                        styles.progressFill,
+                        { width: `${(dreamUsage.used / dreamUsage.total) * 100}%` },
+                      ]}
                     />
                   </View>
-                  
+
+                  {/* Reset Info */}
                   {getDaysUntilReset() > 0 && (
                     <Text style={styles.resetText}>
-                      Resets in {getDaysUntilReset()} days
+                      Resets in {getDaysUntilReset()} day{getDaysUntilReset() !== 1 ? 's' : ''}
                     </Text>
                   )}
                 </View>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.manageButton}
                   onPress={() => setShowSubscriptionModal(true)}
                 >
@@ -301,20 +512,20 @@ export default function SettingsScreen() {
                     {user ? 'No Active Subscription' : 'Sign in to Subscribe'}
                   </Text>
                   <Text style={styles.freeAccountSubtext}>
-                    {user 
+                    {user
                       ? 'Subscribe to start creating amazing dream videos!'
                       : 'Sign in first to view subscription plans'}
                   </Text>
                 </View>
-                
+
                 {user ? (
                   <>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.subscribeButton}
                       onPress={() => setShowSubscriptionModal(true)}
                     >
-                      <LinearGradient 
-                        colors={['#7278E6', '#9F7AEA']} 
+                      <LinearGradient
+                        colors={['#7278E6', '#9F7AEA']}
                         style={styles.subscribeGradient}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
@@ -323,20 +534,14 @@ export default function SettingsScreen() {
                       </LinearGradient>
                     </TouchableOpacity>
 
-                    <TouchableOpacity 
-                      style={styles.restoreButton}
-                      onPress={restorePurchases}
-                    >
+                    <TouchableOpacity style={styles.restoreButton} onPress={restorePurchases}>
                       <Text style={styles.restoreButtonText}>Restore Purchases</Text>
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <TouchableOpacity 
-                    style={styles.subscribeButton}
-                    onPress={handleSignIn}
-                  >
-                    <LinearGradient 
-                      colors={['#7278E6', '#9F7AEA']} 
+                  <TouchableOpacity style={styles.subscribeButton} onPress={handleSignIn}>
+                    <LinearGradient
+                      colors={['#7278E6', '#9F7AEA']}
                       style={styles.subscribeGradient}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 0 }}
@@ -349,14 +554,13 @@ export default function SettingsScreen() {
             )}
           </View>
 
-          {/* GENERAL SECTION - AVAILABLE FOR ALL USERS */}
           <View style={styles.card}>
             <Text style={styles.section}>General</Text>
 
             <TouchableOpacity style={styles.row} onPress={handleLanguagePress}>
               <Text style={styles.rowTitle}>Language</Text>
               <View style={styles.languageDisplay}>
-                <Text style={styles.currentLanguage}>English</Text>
+                <Text style={styles.currentLanguage}>{getCurrentLanguageName()}</Text>
                 <Text style={styles.chev}>›</Text>
               </View>
             </TouchableOpacity>
@@ -365,14 +569,23 @@ export default function SettingsScreen() {
               <Text style={styles.rowTitle}>Privacy Policy</Text>
               <Text style={styles.chev}>›</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.row, { marginTop: 8 }]} onPress={handleTermsPress}>
+              <Text style={styles.rowTitle}>Terms of Service</Text>
+              <Text style={styles.chev}>›</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* SIGN OUT - ONLY SHOW IF USER IS SIGNED IN */}
           {user && (
             <View style={styles.card}>
               <TouchableOpacity style={styles.row} onPress={handleSignOut}>
                 <Text style={[styles.rowTitle, { color: '#DC2626' }]}>Sign Out</Text>
                 <Text style={styles.chev}>›</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.row, { marginTop: 8 }]} onPress={handleDeleteAccount}>
+                <Text style={[styles.rowTitle, { color: '#DC2626' }]}>Delete Account</Text>
+                <Ionicons name="trash-outline" size={22} color="#DC2626" />
               </TouchableOpacity>
             </View>
           )}
@@ -381,124 +594,99 @@ export default function SettingsScreen() {
         </ScrollView>
       </LinearGradient>
 
-      {/* SUBSCRIPTION MODAL */}
-      <Modal
+      <SubscriptionModal
         visible={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        onRestore={restorePurchases}
+        onSelectPlan={handleSelectPlan}
+        currentId={subscription?.id}
+      />
+
+      <Modal
+        visible={showEditNameModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEditNameModal(false)}
+      >
+        <View style={styles.editNameModalContainer}>
+          <View style={styles.editNameModalContent}>
+            <Text style={styles.editNameTitle}>Edit Name</Text>
+            
+            <TextInput
+              style={styles.editNameInput}
+              value={tempName}
+              onChangeText={setTempName}
+              placeholder="Enter your name"
+              placeholderTextColor="#9CA3AF"
+              autoFocus
+              maxLength={50}
+            />
+
+            <View style={styles.editNameButtons}>
+              <TouchableOpacity
+                style={[styles.editNameButton, styles.editNameCancelButton]}
+                onPress={() => setShowEditNameModal(false)}
+              >
+                <Text style={styles.editNameCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.editNameButton, styles.editNameSaveButton]}
+                onPress={handleSaveName}
+              >
+                <Text style={styles.editNameSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showLanguageModal}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowSubscriptionModal(false)}
+        onRequestClose={() => setShowLanguageModal(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Choose Your Plan</Text>
-              <TouchableOpacity 
-                onPress={() => setShowSubscriptionModal(false)}
-                style={styles.closeButton}
-              >
-                <Text style={styles.closeButtonText}>✕</Text>
+        <View style={styles.languageModalContainer}>
+          <View style={styles.languageModalContent}>
+            <View style={styles.languageModalHeader}>
+              <Text style={styles.languageModalTitle}>Select Language</Text>
+              <TouchableOpacity onPress={() => setShowLanguageModal(false)}>
+                <Ionicons name="close" size={28} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* BASIC PLAN */}
-              <TouchableOpacity
-                style={[
-                  styles.planCard,
-                  subscription?.id === 'dream_basic_monthly' && styles.currentPlan
-                ]}
-                onPress={() => handleSelectPlan('basic')}
-                disabled={subscription?.id === 'dream_basic_monthly'}
-              >
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>Basic</Text>
-                  {subscription?.id === 'dream_basic_monthly' && (
-                    <View style={styles.currentBadge}>
-                      <Text style={styles.currentBadgeText}>CURRENT</Text>
-                    </View>
+            <Text style={styles.languageModalSubtitle}>
+              Choose the language for voice transcription
+            </Text>
+
+            <ScrollView 
+              style={styles.languageList}
+              showsVerticalScrollIndicator={false}
+            >
+              {LANGUAGES.map((lang) => (
+                <TouchableOpacity
+                  key={lang.code}
+                  style={[
+                    styles.languageItem,
+                    selectedLanguage === lang.code && styles.languageItemSelected
+                  ]}
+                  onPress={() => handleLanguageSelect(lang.code)}
+                >
+                  <View style={styles.languageItemLeft}>
+                    <Text style={styles.languageFlag}>{lang.flag}</Text>
+                    <Text style={[
+                      styles.languageItemText,
+                      selectedLanguage === lang.code && styles.languageItemTextSelected
+                    ]}>
+                      {lang.name}
+                    </Text>
+                  </View>
+                  {selectedLanguage === lang.code && (
+                    <Ionicons name="checkmark-circle" size={24} color="#7278E6" />
                   )}
-                </View>
-                <Text style={styles.planPrice}>€7.99/month</Text>
-                <View style={styles.planFeatures}>
-                  <Text style={styles.planFeature}>• 3 dreams per month</Text>
-                  <Text style={styles.planFeature}>• HD quality videos</Text>
-                  <Text style={styles.planFeature}>• Basic support</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* PRO PLAN */}
-              <TouchableOpacity
-                style={[
-                  styles.planCard,
-                  styles.recommendedPlan,
-                  subscription?.id === 'dream_pro_monthly' && styles.currentPlan
-                ]}
-                onPress={() => handleSelectPlan('pro')}
-                disabled={subscription?.id === 'dream_pro_monthly'}
-              >
-                <View style={styles.recommendedBadge}>
-                  <Text style={styles.recommendedText}>MOST POPULAR</Text>
-                </View>
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>Pro</Text>
-                  {subscription?.id === 'dream_pro_monthly' && (
-                    <View style={styles.currentBadge}>
-                      <Text style={styles.currentBadgeText}>CURRENT</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.planPrice}>€12.99/month</Text>
-                <View style={styles.planFeatures}>
-                  <Text style={styles.planFeature}>• 5 dreams per month</Text>
-                  <Text style={styles.planFeature}>• HD quality videos</Text>
-                  <Text style={styles.planFeature}>• Priority support</Text>
-                  <Text style={styles.planFeature}>• Early access to features</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* ANNUAL PLAN */}
-              <TouchableOpacity
-                style={[
-                  styles.planCard,
-                  subscription?.id === 'dream_annual' && styles.currentPlan
-                ]}
-                onPress={() => handleSelectPlan('annual')}
-                disabled={subscription?.id === 'dream_annual'}
-              >
-                <View style={styles.savingsBadge}>
-                  <Text style={styles.savingsText}>SAVE 44%</Text>
-                </View>
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>Annual</Text>
-                  {subscription?.id === 'dream_annual' && (
-                    <View style={styles.currentBadge}>
-                      <Text style={styles.currentBadgeText}>CURRENT</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.planPrice}>€89.99/year</Text>
-                <Text style={styles.planSubtext}>Just €7.50/month</Text>
-                <View style={styles.planFeatures}>
-                  <Text style={styles.planFeature}>• 60 dreams per year</Text>
-                  <Text style={styles.planFeature}>• HD quality videos</Text>
-                  <Text style={styles.planFeature}>• Priority support</Text>
-                  <Text style={styles.planFeature}>• All premium features</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={styles.restoreModalButton}
-                onPress={() => {
-                  setShowSubscriptionModal(false);
-                  restorePurchases();
-                }}
-              >
-                <Text style={styles.restoreModalButtonText}>Restore Purchases</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.legalText}>
-                Subscriptions auto-renew. Cancel anytime in Google Play Store.
-              </Text>
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
         </View>
@@ -507,54 +695,141 @@ export default function SettingsScreen() {
   );
 }
 
-// ENHANCED STYLES WITH ADDITIONAL ANDROID OPTIMIZATIONS
+function SubscriptionModal({
+  visible,
+  onClose,
+  onRestore,
+  onSelectPlan,
+  currentId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onRestore: () => void;
+  onSelectPlan: (plan: 'weekly' | 'basic' | 'pro') => void;
+  currentId?: string;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Choose Your Plan</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} bounces>
+            {/* WEEKLY */}
+            <TouchableOpacity
+              style={[styles.planCard, currentId === 'dream_weekly' && styles.currentPlan]}
+              onPress={() => onSelectPlan('weekly')}
+              disabled={currentId === 'dream_weekly'}
+            >
+              <View style={styles.planHeader}>
+                <Text style={styles.planName}>Weekly</Text>
+                {currentId === 'dream_weekly' && (
+                  <View style={styles.currentBadge}>
+                    <Text style={styles.currentBadgeText}>CURRENT</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.planPrice}>$3.49/week</Text>
+              <View style={styles.planFeatures}>
+                <Text style={styles.planFeature}>• 1 dream per week</Text>
+                <Text style={styles.planFeature}>• HD quality videos</Text>
+                <Text style={styles.planFeature}>• Low commitment</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* BASIC MONTHLY */}
+            <TouchableOpacity
+              style={[styles.planCard, currentId === 'dream_basic_monthly' && styles.currentPlan]}
+              onPress={() => onSelectPlan('basic')}
+              disabled={currentId === 'dream_basic_monthly'}
+            >
+              <View style={styles.planHeader}>
+                <Text style={styles.planName}>Basic Monthly</Text>
+                {currentId === 'dream_basic_monthly' && (
+                  <View style={styles.currentBadge}>
+                    <Text style={styles.currentBadgeText}>CURRENT</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.planPrice}>$9.49/month</Text>
+              <View style={styles.planFeatures}>
+                <Text style={styles.planFeature}>• 3 dreams per month</Text>
+                <Text style={styles.planFeature}>• HD quality videos</Text>
+                <Text style={styles.planFeature}>• Basic support</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* PRO MONTHLY */}
+            <TouchableOpacity
+              style={[styles.planCard, styles.recommendedPlan, currentId === 'dream_pro_monthly' && styles.currentPlan]}
+              onPress={() => onSelectPlan('pro')}
+              disabled={currentId === 'dream_pro_monthly'}
+            >
+              <View style={styles.savingsBadge}>
+                <Text style={styles.savingsText}>BEST VALUE</Text>
+              </View>
+              <View style={styles.planHeader}>
+                <Text style={styles.planName}>Pro Monthly</Text>
+                {currentId === 'dream_pro_monthly' && (
+                  <View style={styles.currentBadge}>
+                    <Text style={styles.currentBadgeText}>CURRENT</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.planPrice}>$12.49/month</Text>
+              <Text style={styles.planSubtext}>Just $2.50 per dream</Text>
+              <View style={styles.planFeatures}>
+                <Text style={styles.planFeature}>• 5 dreams per month</Text>
+                <Text style={styles.planFeature}>• HD quality videos</Text>
+                <Text style={styles.planFeature}>• Priority support</Text>
+                <Text style={styles.planFeature}>• Early access to features</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.restoreModalButton} onPress={() => { onClose(); onRestore(); }}>
+              <Text style={styles.restoreModalButtonText}>Restore Purchases</Text>
+            </TouchableOpacity>
+
+            {/* Legal Links */}
+            <View style={styles.legalLinks}>
+              <TouchableOpacity onPress={() => { onClose(); router.push('/terms-of-service'); }}>
+                <Text style={styles.legalLinkText}>Terms of Service</Text>
+              </TouchableOpacity>
+              <Text style={styles.legalSeparator}> • </Text>
+              <TouchableOpacity onPress={() => { onClose(); router.push('/privacy-policy'); }}>
+                <Text style={styles.legalLinkText}>Privacy Policy</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.legalText}>Subscriptions auto-renew. Cancel anytime in App Store.</Text>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#fff',
-    fontSize: 18,
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    // Add text rendering for Android
-    ...(Platform.OS === 'android' && {
-      textAlignVertical: 'center',
-      includeFontPadding: false,
-    }),
-  },
+  container: { flex: 1 },
   title: {
     color: '#fff',
     fontSize: 45,
     fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
-    paddingHorizontal: 0,
-    paddingTop: 4,
     marginBottom: 4,
-    // Enhanced Android text rendering
-    ...(Platform.OS === 'android' && {
-      textAlignVertical: 'center',
-      includeFontPadding: false,
-      letterSpacing: -0.5,
-    }),
+    ...(Platform.OS === 'android' && { includeFontPadding: false, letterSpacing: -0.5 }),
   },
   subtitle: {
     color: 'rgba(255,255,255,0.85)',
-    marginBottom: 28,
+    marginBottom: 24,
     fontSize: 16,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   },
   card: {
     backgroundColor: '#fff',
@@ -575,352 +850,157 @@ const styles = StyleSheet.create({
     opacity: 0.6,
     marginBottom: 16,
     paddingHorizontal: 4,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   },
-
-  // SIGN IN PROMPT STYLES FOR NON-AUTHENTICATED USERS
-  signInPrompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-  },
+  signInPrompt: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10 },
   signInAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
+    width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6',
+    alignItems: 'center', justifyContent: 'center', marginRight: 16, borderWidth: 2, borderColor: '#E5E7EB', borderStyle: 'dashed',
   },
-  signInAvatarText: {
-    fontSize: 28,
-    color: '#9CA3AF',
-    fontWeight: Platform.OS === 'ios' ? '300' : 'normal',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light',
+  signInAvatarText: { fontSize: 28, color: '#9CA3AF', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-light', fontWeight: Platform.OS === 'ios' ? '300' : 'normal' },
+  signInTextContainer: { flex: 1 },
+  signInTitle: { fontSize: 18, fontWeight: Platform.OS === 'ios' ? '700' : 'bold', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', color: '#0A2540', marginBottom: 4 },
+  signInSubtext: { fontSize: 14, color: '#68707D' },
+  signInArrow: { fontSize: 24, color: '#9CA3AF' },
+  profileSection: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 16, 
+    paddingHorizontal: 12,
+    backgroundColor: '#FAFAFA',
+    borderRadius: 12,
+    marginBottom: 20,
   },
-  signInTextContainer: {
-    flex: 1,
+  avatarContainer: { 
+    position: 'relative', 
+    marginRight: 16 
   },
-  signInTitle: {
+  avatar: { 
+    width: 64, 
+    height: 64, 
+    borderRadius: 32 
+  },
+  avatarPlaceholder: { 
+    width: 64, 
+    height: 64, 
+    borderRadius: 32, 
+    backgroundColor: '#7278E6', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  avatarText: { 
+    fontSize: 24, 
+    color: '#fff', 
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', 
+    fontWeight: 'bold' 
+  },
+  editBadge: { 
+    position: 'absolute', 
+    bottom: -2, 
+    right: -2, 
+    backgroundColor: '#7278E6', 
+    width: 20, 
+    height: 20, 
+    borderRadius: 10, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderWidth: 2, 
+    borderColor: '#fff' 
+  },
+  editBadgeText: { 
+    fontSize: 10, 
+    color: '#fff' 
+  },
+  nameContainer: { 
+    flex: 1 
+  },
+  tapToSetText: {
     fontSize: 18,
+    color: '#0A2540',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  tapToSetSubtext: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  editNameModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  editNameModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  editNameTitle: {
+    fontSize: 22,
     fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
-    marginBottom: 4,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  signInSubtext: {
-    fontSize: 14,
-    color: '#68707D',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  signInArrow: {
-    fontSize: 24,
-    color: '#9CA3AF',
-    fontWeight: Platform.OS === 'ios' ? '300' : 'normal',
-  },
-
-  // PROFILE STYLES
-  profileSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: 20,
-    paddingHorizontal: 10,
+    textAlign: 'center',
   },
-  avatarContainer: {
-    position: 'relative',
-    marginRight: 16,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-  },
-  avatarPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#7278E6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 24,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    color: '#fff',
-  },
-  editBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: '#7278E6',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  editBadgeText: {
-    fontSize: 10,
-    color: '#fff',
-  },
-  nameContainer: {
-    flex: 1,
-  },
-  displayName: {
-    fontSize: 20,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    color: '#0A2540',
-    marginBottom: 2,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  emailText: {
-    fontSize: 14,
-    color: '#68707D',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-
-  // SUBSCRIPTION STYLES
-  subscriptionCard: {
-    minHeight: 140,
-  },
-  subscriptionInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingHorizontal: 10,
-  },
-  planBadge: {
-    backgroundColor: '#7278E6',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  planBadgeText: {
-    color: '#fff',
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    fontSize: 14,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  subscriptionPrice: {
-    fontSize: 18,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    color: '#0A2540',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  usageContainer: {
+  editNameInput: {
     backgroundColor: '#F3F4F6',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    marginHorizontal: 10,
-  },
-  usageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  usageTitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  usageCount: {
-    fontSize: 16,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    color: '#0A2540',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  progressBar: {
-    height: 8,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#7278E6',
-    borderRadius: 4,
-  },
-  resetText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  manageButton: {
-    borderWidth: 1,
-    borderColor: '#7278E6',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginHorizontal: 10,
-  },
-  manageButtonText: {
-    color: '#7278E6',
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    fontSize: 16,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  freeAccountInfo: {
-    paddingHorizontal: 10,
-    marginBottom: 16,
-  },
-  freeAccountTitle: {
-    fontSize: 18,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    color: '#0A2540',
-    marginBottom: 4,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  freeAccountSubtext: {
-    fontSize: 14,
-    color: '#68707D',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  subscribeButton: {
-    marginHorizontal: 10,
-    marginBottom: 12,
-  },
-  subscribeGradient: {
-    borderRadius: 12,
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    alignItems: 'center',
-  },
-  subscribeButtonText: {
-    color: '#fff',
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     fontSize: 16,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  restoreButton: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  restoreButtonText: {
-    color: '#7278E6',
-    fontSize: 14,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-
-  // GENERAL STYLES
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  rowTitle: { 
-    fontSize: 18, 
-    fontWeight: Platform.OS === 'ios' ? '800' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black',
     color: '#0A2540',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
   },
-  chev: { 
-    fontSize: 22, 
-    color: '#9CA3AF' 
-  },
-  languageDisplay: {
+  editNameButtons: {
     flexDirection: 'row',
+    gap: 12,
+  },
+  editNameButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  currentLanguage: {
+  editNameCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  editNameSaveButton: {
+    backgroundColor: '#7278E6',
+  },
+  editNameCancelText: {
     fontSize: 16,
-    color: '#7278E6',
     fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    marginRight: 8,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    color: '#6B7280',
   },
-  footer: { 
-    textAlign: 'center', 
-    color: 'rgba(255,255,255,0.85)', 
-    marginTop: 10,
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+  editNameSaveText: {
+    fontSize: 16,
+    fontWeight: Platform.OS === 'ios' ? '600' : 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    color: '#fff',
   },
-
-  // MODAL STYLES WITH ANDROID FONT FIXES
-  modalContainer: {
+  languageModalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
-  modalContent: {
+  languageModalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '90%',
+    maxHeight: '80%',
     paddingBottom: 20,
   },
-  modalHeader: {
+  languageModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -928,163 +1008,152 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  modalTitle: {
+  languageModalTitle: {
     fontSize: 24,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     color: '#0A2540',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  closeButton: {
-    padding: 4,
-  },
-  closeButtonText: {
-    fontSize: 24,
-    color: '#6B7280',
-  },
-  planCard: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    position: 'relative',
-  },
-  recommendedPlan: {
-    borderColor: '#7278E6',
-    backgroundColor: '#F5F3FF',
-  },
-  currentPlan: {
-    opacity: 0.7,
-  },
-  recommendedBadge: {
-    position: 'absolute',
-    top: -10,
-    left: 20,
-    backgroundColor: '#7278E6',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  recommendedText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    fontWeight: 'bold',
   },
-  savingsBadge: {
-    position: 'absolute',
-    top: -10,
-    left: 20,
-    backgroundColor: '#10B981',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+  languageModalSubtitle: {
+    fontSize: 14,
+    color: '#68707D',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
-  savingsText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+  languageList: {
+    paddingHorizontal: 20,
   },
-  planHeader: {
+  languageItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginVertical: 4,
+    backgroundColor: '#F9FAFB',
   },
-  planName: {
-    fontSize: 22,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  languageItemSelected: {
+    backgroundColor: '#F0F0FF',
+    borderWidth: 2,
+    borderColor: '#7278E6',
+  },
+  languageItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  languageFlag: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  languageItemText: {
+    fontSize: 16,
     color: '#0A2540',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  currentBadge: {
-    backgroundColor: '#6B7280',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  currentBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    fontWeight: '600',
   },
-  planPrice: {
-    fontSize: 28,
-    fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+  languageItemTextSelected: {
     color: '#7278E6',
-    marginBottom: 4,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    fontWeight: 'bold',
   },
-  planSubtext: {
-    fontSize: 14,
+  subscriptionCard: { minHeight: 140 },
+  planBadge: { 
+    backgroundColor: '#7278E6', 
+    paddingHorizontal: 14, 
+    paddingVertical: 8, 
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+    marginLeft: 10,
+  },
+  planBadgeText: { color: '#fff', fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  subscriptionPrice: { fontSize: 18, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  dreamsRemainingContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  dreamsRemainingBig: {
+    fontSize: 60,
+    color: '#7278E6',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    fontWeight: 'bold',
+    lineHeight: 68,
+  },
+  dreamsRemainingLabel: {
+    fontSize: 16,
     color: '#6B7280',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    marginBottom: 12,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+    marginTop: 4,
   },
-  planFeatures: {
-    marginTop: 12,
+  usageContainer: { 
+    backgroundColor: '#F3F4F6', 
+    borderRadius: 16, 
+    padding: 20, 
+    marginBottom: 16, 
+    marginHorizontal: 10 
   },
-  planFeature: {
-    fontSize: 14,
-    color: '#4B5563',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    marginBottom: 6,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
+  usageHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  usageTitle: { fontSize: 14, color: '#6B7280' },
+  usageCount: { fontSize: 16, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  progressBar: { height: 8, backgroundColor: '#E5E7EB', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
+  progressFill: { height: '100%', backgroundColor: '#7278E6', borderRadius: 4 },
+  resetText: { fontSize: 12, color: '#9CA3AF' },
+  manageButton: { borderWidth: 1, borderColor: '#7278E6', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginHorizontal: 10 },
+  manageButtonText: { color: '#7278E6', fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  freeAccountInfo: { paddingHorizontal: 10, marginBottom: 16 },
+  freeAccountTitle: { fontSize: 18, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  freeAccountSubtext: { fontSize: 14, color: '#68707D' },
+  subscribeButton: { marginHorizontal: 10, marginBottom: 12 },
+  subscribeGradient: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  subscribeButtonText: { color: '#fff', fontSize: 16, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  restoreButton: { alignItems: 'center', paddingVertical: 8 },
+  restoreButtonText: { color: '#7278E6', fontSize: 14 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 10 },
+  rowTitle: { fontSize: 18, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-black', fontWeight: '800' },
+  chev: { fontSize: 22, color: '#9CA3AF' },
+  languageDisplay: { flexDirection: 'row', alignItems: 'center' },
+  currentLanguage: { fontSize: 16, color: '#7278E6', marginRight: 8, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: '600' },
+  footer: { textAlign: 'center', color: 'rgba(255,255,255,0.85)', marginTop: 10 },
+  modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', paddingBottom: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  modalTitle: { fontSize: 24, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  closeButton: { padding: 4 },
+  closeButtonText: { fontSize: 24, color: '#6B7280' },
+  planCard: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 20, marginHorizontal: 20, marginTop: 16, borderWidth: 2, borderColor: '#E5E7EB', position: 'relative' },
+  recommendedPlan: { borderColor: '#10B981', backgroundColor: '#F0FDF4' },
+  currentPlan: { opacity: 0.7 },
+  savingsBadge: { position: 'absolute', top: -10, left: 20, backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  savingsText: { color: '#fff', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  planName: { fontSize: 22, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  currentBadge: { backgroundColor: '#6B7280', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  currentBadgeText: { color: '#fff', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  planPrice: { fontSize: 28, color: '#7278E6', marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
+  planSubtext: { fontSize: 14, color: '#6B7280', marginBottom: 12 },
+  planFeatures: { marginTop: 12 },
+  planFeature: { fontSize: 14, color: '#4B5563', marginBottom: 6 },
+  restoreModalButton: { alignItems: 'center', marginTop: 24, marginBottom: 12 },
+  restoreModalButtonText: { color: '#7278E6', fontSize: 14, textDecorationLine: 'underline' },
+  legalLinks: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginTop: 8,
+    marginBottom: 8 
   },
-  restoreModalButton: {
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  restoreModalButtonText: {
-    color: '#7278E6',
-    fontSize: 14,
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
+  legalLinkText: { 
+    fontSize: 12, 
+    color: '#7C86FF', 
     textDecorationLine: 'underline',
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
-  },
-  legalText: {
-    fontSize: 11,
-    color: '#9CA3AF',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-    fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
-    textAlign: 'center',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    ...(Platform.OS === 'android' && {
-      includeFontPadding: false,
-    }),
   },
+  legalSeparator: { 
+    fontSize: 12, 
+    color: '#9CA3AF',
+    marginHorizontal: 4,
+  },
+  legalText: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginHorizontal: 20, marginBottom: 20 },
 });

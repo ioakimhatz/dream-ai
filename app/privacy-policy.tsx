@@ -254,23 +254,24 @@ export default function PrivacyPolicyScreen() {
           <Text style={styles.paragraph}>
             <Text style={styles.bold}>Data Protection Officer:</Text>
           </Text>
-          <Text style={styles.contactInfo}>dpo@dreamai.app</Text>
+          <Text style={styles.contactInfo}>support@dream-ai.app</Text>
           
           <Text style={styles.paragraph}>
             <Text style={styles.bold}>Legal Inquiries:</Text>
           </Text>
-          <Text style={styles.contactInfo}>legal@dreamai.app</Text>
+          <Text style={styles.contactInfo}>support@dream-ai.app</Text>
           
           <Text style={styles.paragraph}>
             <Text style={styles.bold}>DMCA/Copyright Claims:</Text>
           </Text>
-          <Text style={styles.contactInfo}>dmca@dreamai.app</Text>
+          <Text style={styles.contactInfo}>support@dream-ai.app</Text>
           
           <Text style={styles.paragraph}>
             <Text style={styles.bold}>General Support:</Text>
           </Text>
-          <Text style={styles.contactInfo}>support@dreamai.app</Text>
+          <Text style={styles.contactInfo}>support@dream-ai.app</Text>
         </View>
+
 
         {/* Governing Law */}
         <View style={styles.card}>

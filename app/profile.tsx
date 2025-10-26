@@ -1,4 +1,4 @@
-// app/profile.tsx - Complete Updated for Subscription System
+// app/profile.tsx - FIXED: Clean name display
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -13,11 +13,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PaywallModal } from '../components/PaywallModal';
+import { SubscriptionModal } from '../components/SubscriptionModal';
 import { useAuth } from './contexts/AuthContext';
 
 export default function ProfileScreen() {
-  const { user, signOut, getDreamsRemaining, hasActivePlan } = useAuth();
+  const { user, signOut, updateSubscription } = useAuth();
   const [showPaywall, setShowPaywall] = useState(false);
 
   const handleSignOut = async () => {
@@ -39,47 +39,98 @@ export default function ProfileScreen() {
   };
 
   const getPlanName = () => {
-    if (!user?.subscription.plan) {
-      return user?.subscription.isTrialActive ? 'Free Trial' : 'No Plan';
-    }
+    if (!user?.dreamUsage) return 'Free';
     
-    switch (user.subscription.plan) {
-      case 'basic_pro':
-        return 'Basic Pro';
-      case 'premium_pro':
-        return 'Premium Pro';
-      case 'annual_pro':
-        return 'Annual Pro';
+    switch (user.dreamUsage.planId) {
+      case 'basic':
+        return 'Basic';
+      case 'pro':
+        return 'Pro';
+      case 'annual':
+        return 'Annual';
       default:
-        return 'Unknown Plan';
+        return 'Free';
     }
   };
 
   const getPlanPrice = () => {
-    if (!user?.subscription.plan) return 'Free';
+    if (!user?.dreamUsage) return 'Free';
     
-    switch (user.subscription.plan) {
-      case 'basic_pro':
-        return '$5.99/month';
-      case 'premium_pro':
-        return '$9.99/month';
-      case 'annual_pro':
-        return '$89.99/year';
+    switch (user.dreamUsage.planId) {
+      case 'basic':
+        return '€7.99/month';
+      case 'pro':
+        return '€12.99/month';
+      case 'annual':
+        return '€89.99/year';
       default:
-        return 'Unknown';
+        return 'Free';
     }
   };
 
   const getRenewalDate = () => {
-    if (user?.subscription.isTrialActive && user?.subscription.trialEndsAt) {
-      return `Trial ends ${user.subscription.trialEndsAt.toLocaleDateString()}`;
+    if (user?.dreamUsage?.resetDate) {
+      const date = new Date(user.dreamUsage.resetDate);
+      return `Renews ${date.toLocaleDateString()}`;
     }
     
-    if (user?.subscription.renewalDate) {
-      return `Renews ${user.subscription.renewalDate.toLocaleDateString()}`;
+    return 'No active plan';
+  };
+
+  const getDreamsRemaining = () => {
+    if (!user?.dreamUsage) return 0;
+    return Math.max(0, user.dreamUsage.total - user.dreamUsage.used);
+  };
+
+  const hasActivePlan = () => {
+    return user?.dreamUsage && user.dreamUsage.planId !== 'free';
+  };
+
+  const handleSelectPlan = async (plan: 'basic' | 'pro' | 'annual') => {
+    const dreamCounts = { basic: 3, pro: 5, annual: 60 };
+    
+    await updateSubscription({
+      plan: plan,
+      isActive: true,
+      renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      dreamsRemaining: dreamCounts[plan],
+      totalDreams: dreamCounts[plan],
+    });
+    
+    setShowPaywall(false);
+    
+    Alert.alert('Success!', `${plan.toUpperCase()} plan activated! You now have ${dreamCounts[plan]} dreams.`);
+  };
+
+  const handleRestore = async () => {
+    Alert.alert('Restore', 'No purchases found (Demo mode)');
+  };
+
+  // 🔥 HELPER: Get clean display name
+  const getDisplayName = () => {
+    if (!user) return 'User';
+    
+    // If name looks like an ugly Apple ID, return clean fallback
+    if (
+      user.name.length > 30 ||
+      user.name.includes('.eba') ||
+      user.name.includes('.403') ||
+      /^\d{6}/.test(user.name)
+    ) {
+      return 'Apple User';
     }
     
-    return 'No renewal date';
+    return user.name || 'User';
+  };
+
+  // 🔥 HELPER: Should we show email?
+  const shouldShowEmail = () => {
+    if (!user) return false;
+    
+    return (
+      !user.email.includes('privaterelay.appleid.com') &&
+      user.email.length < 50
+    );
   };
 
   if (!user) {
@@ -113,17 +164,21 @@ export default function ProfileScreen() {
         <ScrollView style={styles.scrollView}>
           {/* Profile Header */}
           <View style={styles.profileHeader}>
-            {user?.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.profileAvatar} />
+            {user?.photo ? (
+              <Image source={{ uri: user.photo }} style={styles.profileAvatar} />
             ) : (
               <View style={styles.placeholderAvatar}>
                 <Text style={styles.avatarText}>
-                  {user.name.charAt(0).toUpperCase()}
+                  {getDisplayName().charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
-            <Text style={styles.profileName}>{user?.name}</Text>
-            <Text style={styles.profileEmail}>{user?.email}</Text>
+            {/* 🔥 FIXED: Clean name display */}
+            <Text style={styles.profileName}>{getDisplayName()}</Text>
+            {/* 🔥 FIXED: Only show real emails */}
+            {shouldShowEmail() && (
+              <Text style={styles.profileEmail}>{user.email}</Text>
+            )}
           </View>
 
           {/* Subscription Section */}
@@ -139,7 +194,7 @@ export default function ProfileScreen() {
               <View style={styles.dreamsInfo}>
                 <Text style={styles.dreamsAmount}>{getDreamsRemaining()}</Text>
                 <Text style={styles.dreamsLabel}>
-                  Dreams Remaining This {user?.subscription.plan === 'annual_pro' ? 'Month' : 'Period'}
+                  Dreams Remaining This {user?.dreamUsage?.planId === 'annual' ? 'Month' : 'Period'}
                 </Text>
               </View>
               
@@ -201,12 +256,13 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Paywall Modal */}
-        <PaywallModal
+        {/* Subscription Modal */}
+        <SubscriptionModal
           visible={showPaywall}
           onClose={() => setShowPaywall(false)}
-          dreamsNeeded={1}
-          feature="Subscription Management"
+          onRestore={handleRestore}
+          onSelectPlan={handleSelectPlan}
+          currentId={user?.dreamUsage?.planId}
         />
       </LinearGradient>
     </SafeAreaView>

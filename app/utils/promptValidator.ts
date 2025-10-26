@@ -5,6 +5,28 @@ export interface PromptAnalysis {
   issues: string[];
   suggestions: string[];
   canGenerate: boolean;
+  hasAdultContent?: boolean; // ADD THIS LINE
+}
+
+// ADD THIS FUNCTION - Detect 18+ content
+export function detectAdultContent(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  
+  // Keywords that actually break the model
+  const adultKeywords = [
+    'nude', 'naked', 'nsfw', 'explicit', 'erotic',
+    'porn', 'xxx', 'adult only', '18+', 'nudity',
+    'topless', 'lewd', 'vulgar', 'obscene' , 'fucking'
+  ];
+  
+  const detected = adultKeywords.some(keyword => lowerText.includes(keyword));
+  
+  // DEBUG
+  console.log('🔍 Checking prompt:', text);
+  console.log('🔍 Adult content detected:', detected);
+  console.log('🔍 Matched keywords:', adultKeywords.filter(keyword => lowerText.includes(keyword)));
+  
+  return detected;
 }
 
 export function analyzePromptStrength(prompt: string): PromptAnalysis {
@@ -87,6 +109,9 @@ export function analyzePromptStrength(prompt: string): PromptAnalysis {
     score += 10; // Some detail
   }
 
+  // CHECK FOR ADULT CONTENT
+  const hasAdultContent = detectAdultContent(prompt);
+
   // DETERMINE STRENGTH - Require 8+ words for generation
   let strength: 'WEAK' | 'FAIR' | 'GOOD' | 'EXCELLENT';
   let canGenerate = true;
@@ -108,6 +133,11 @@ export function analyzePromptStrength(prompt: string): PromptAnalysis {
   } else {
     strength = 'EXCELLENT';
     canGenerate = true;
+  }
+
+  // BLOCK GENERATION IF ADULT CONTENT DETECTED
+  if (hasAdultContent) {
+    canGenerate = false;
   }
 
   // CONTEXTUAL GUIDANCE - Help users build better prompts
@@ -152,7 +182,8 @@ export function analyzePromptStrength(prompt: string): PromptAnalysis {
     score: Math.min(100, score),
     issues: issues.slice(0, 1), // Only show 1 issue max
     suggestions: suggestions.slice(0, 1), // Only show 1 suggestion max
-    canGenerate
+    canGenerate,
+    hasAdultContent // ADD THIS
   };
 }
 
@@ -222,10 +253,3 @@ export function getContextGuidance(wordCount: number): string {
 export function getDreamPromptTemplate(): string {
   return "I was [DOING WHAT] with [WHO] in [WHERE] feeling [HOW] during [WHEN]";
 }
-
-// The new validator focuses on:
-// 1. Encouraging users rather than blocking them
-// 2. Letting AI enhancement do the heavy lifting
-// 3. Simple, friendly feedback
-// 4. Allowing generation for almost anything reasonable
-// 5. Trust in the 100x AI enhancement system

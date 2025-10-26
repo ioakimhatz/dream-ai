@@ -1,4 +1,4 @@
-// app/(auth)/verify-otp.tsx - 4-DIGIT CODE VERIFICATION
+// app/(auth)/verify-otp.tsx - CLEAN PRODUCTION VERSION
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -15,7 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export default function VerifyOTPScreen() {
   const { email } = useLocalSearchParams();
-  const [code, setCode] = useState(['', '', '', '']); // 4 DIGITS
+  const [code, setCode] = useState(['', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const inputs = useRef<TextInput[]>([]);
@@ -23,7 +23,6 @@ export default function VerifyOTPScreen() {
   const { verifyOTP, resendOTP, tempEmail } = useAuth();
 
   useEffect(() => {
-    // Start countdown timer for resend
     const timer = setInterval(() => {
       setResendTimer((prev) => {
         if (prev <= 1) {
@@ -40,7 +39,6 @@ export default function VerifyOTPScreen() {
   const handleCodeChange = (text: string, index: number) => {
     const newCode = [...code];
     
-    // Handle paste
     if (text.length > 1) {
       const pastedCode = text.slice(0, 4).split('');
       for (let i = 0; i < pastedCode.length && i < 4; i++) {
@@ -48,7 +46,6 @@ export default function VerifyOTPScreen() {
       }
       setCode(newCode);
       
-      // Focus last input or submit if complete
       const lastIndex = Math.min(pastedCode.length - 1, 3);
       inputs.current[lastIndex]?.focus();
       
@@ -61,12 +58,10 @@ export default function VerifyOTPScreen() {
     newCode[index] = text;
     setCode(newCode);
 
-    // Auto-focus next
     if (text && index < 3) {
       inputs.current[index + 1]?.focus();
     }
 
-    // Auto-submit when complete
     if (index === 3 && text) {
       const fullCode = newCode.join('');
       if (fullCode.length === 4) {
@@ -84,11 +79,9 @@ export default function VerifyOTPScreen() {
   const verifyCode = async (fullCode: string) => {
     setIsVerifying(true);
     try {
-      // Verify OTP code using AuthContext method
       const success = await verifyOTP(fullCode);
       
       if (success) {
-        // Success - navigate to main app
         router.replace('/(tabs)' as any);
       } else {
         Alert.alert('Invalid Code', 'Please check your code and try again');
@@ -135,7 +128,7 @@ export default function VerifyOTPScreen() {
         </Text>
 
         <View style={styles.codeContainer}>
-          {[0, 1, 2, 3].map((index) => ( // 4 INPUTS
+          {[0, 1, 2, 3].map((index) => (
             <TextInput
               key={index}
               ref={(ref) => {
@@ -177,12 +170,7 @@ export default function VerifyOTPScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* Dev mode hint */}
-        {__DEV__ && (
-          <Text style={styles.devHint}>
-            Dev Mode: Check the alert for your OTP code
-          </Text>
-        )}
+        {/* 🔥 REMOVED ``HINT */}
       </View>
     </SafeAreaView>
   );
@@ -228,11 +216,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   codeInput: {
-    width: 65, // Larger width for 4 inputs
-    height: 70, // Larger height
+    width: 65,
+    height: 70,
     backgroundColor: '#F5F5F7',
     borderRadius: 16,
-    fontSize: 28, // Larger font
+    fontSize: 28,
     fontWeight: '700',
     textAlign: 'center',
     color: '#000',
@@ -267,11 +255,5 @@ const styles = StyleSheet.create({
   },
   resendLinkDisabled: {
     opacity: 0.6,
-  },
-  devHint: {
-    fontSize: 12,
-    color: '#FF6B6B',
-    textAlign: 'center',
-    marginTop: 20,
   },
 });

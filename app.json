@@ -3,31 +3,44 @@
     "name": "Dream AI",
     "slug": "dreamverse-fresh",
     "owner": "ioakimxtz",
-    "version": "1.0.0",
+    "version": "1.0.9",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logodreamai1024.png",
     "scheme": "dreamai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "notification": {
+      "icon": "./assets/images/logodreamai1024.png",
+      "color": "#7278E6",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Dream AI"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ioakimxtz.dreamai",
+      "buildNumber": "10",
       "usesAppleSignIn": true,
+      "googleServicesFile": "./ios/GoogleService-Info.plist",
+      "appleTeamId": "P79PBYKHK9",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to capture faces for dream videos.",
-        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select images.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone to record your dream descriptions."
+        "NSPhotoLibraryUsageDescription": "Dream AI needs access to your photo library so you can select personal photos to transform into AI-generated dream videos. For example, you can choose a photo of yourself or loved ones to appear in your personalized dream sequence.",
+        "NSPhotoLibraryAddUsageDescription": "Dream AI needs permission to save your generated dream videos to your photo library so you can keep them forever and share them with friends and family.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record your dream descriptions.",
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
       },
       "config": {
         "googleSignIn": {
-          "reservedClientId": "com.googleusercontent.apps.657368542105-1o90lpfe1uo82bcbb22b82kv4rvba9ia"
+          "reservedClientId": "com.googleusercontent.apps.967701675568-ipr1qtc009migtvem6nce0poq213ic6q"
         }
-      },
-      "appleTeamId": "P79PBYKHK9"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/logodreamai1024.png",
         "backgroundColor": "#7C86FF"
       },
       "package": "com.ioakimxtz.dreamai",
@@ -37,15 +50,31 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "com.android.vending.BILLING",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS"
       ],
-      "versionCode": 1,
-      "jsEngine": "hermes"
+      "versionCode": 2,
+      "jsEngine": "hermes",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "dreamai"
+            }
+          ]
+        }
+      ],
+      "googleServicesFile": "./android/app/google-services.json"
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/logodreamai1024.png"
     },
     "plugins": [
       "expo-router",
@@ -54,7 +83,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.657368542105-1o90lpfe1uo82bcbb22b82kv4rvba9ia"
+          "iosUrlScheme": "com.googleusercontent.apps.967701675568-ipr1qtc009migtvem6nce0poq213ic6q"
         }
       ],
       [
@@ -76,18 +105,25 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/logodreamai1024.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#7C86FF"
         }
       ],
-      "expo-av",
       "expo-secure-store",
       "expo-image-picker",
       "expo-font",
       "expo-web-browser",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logodreamai1024.png",
+          "color": "#7278E6",
+          "defaultChannel": "default"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

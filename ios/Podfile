@@ -62,5 +62,3 @@ target 'DreamAI' do
     end
   end
 end
-  pod 'ExpoAppleAuthentication', :path => '../node_modules/expo-apple-authentication/ios'
-  pod 'ExpoAppleAuthentication', :path => '../node_modules/expo-apple-authentication/ios'

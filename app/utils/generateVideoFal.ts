@@ -1,158 +1,99 @@
-// app/utils/generateVideoFal.ts - DREAM AI CINEMA ENGINE
+// app/utils/generateVideoFal.ts - DREAM AI CINEMA ENGINE (Hailuo 02, identity-aware)
 
 import * as FileSystem from 'expo-file-system';
-import { stitchNative } from './nativeStitch';   // ✅ native-first
-import { stitchClips } from './stitcher';        // ✅ cloud fallback
+import { stitchNative } from './nativeStitch';                // native-first (stubbed to force fallback)
+import { stitchWithCloudinary } from './cloudinaryStitch';    // cloud fallback
+import { getOrCreateIdentityImageUrl } from './identityLock';
 
-// Multiple API keys for parallel generation
+type Engine = 'hailuo-02';
+const ENGINE: Engine = 'hailuo-02';
+
+// Multiple API keys for parallel generation (or fall back to single)
 const FAL_API_KEYS = [
   process.env.EXPO_PUBLIC_FAL_API_KEY_1,
   process.env.EXPO_PUBLIC_FAL_API_KEY_2,
   process.env.EXPO_PUBLIC_FAL_API_KEY_3,
 ];
 
-// Fallback to single key if others not provided
 const getApiKey = (index: number): string => {
   const key = FAL_API_KEYS[index] || process.env.EXPO_PUBLIC_FAL_API_KEY;
-  if (!key) {
-    throw new Error(`Dream AI API key ${index + 1} not configured`);
-  }
+  if (!key) throw new Error(`Dream AI API key ${index + 1} not configured`);
   return key;
 };
 
-// Optional thumbnail generation
 async function extractVideoThumbnail(videoUri: string): Promise<string | null> {
   try {
     const VideoThumbnails = await import('expo-video-thumbnails').catch(() => null);
-
-    if (VideoThumbnails) {
-      const thumbnail = await VideoThumbnails.getThumbnailAsync(videoUri, {
-        time: 1000,
-        quality: 0.8,
-      });
-      return thumbnail.uri;
-    }
-
-    console.warn('expo-video-thumbnails not available, skipping thumbnail generation');
-    return null;
-  } catch (error) {
-    console.warn('Failed to extract thumbnail:', error);
+    if (!VideoThumbnails) return null;
+    const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time: 1000, quality: 0.8 });
+    return uri;
+  } catch {
     return null;
   }
 }
 
-// Single video generation with Dream AI Engine
-export async function generateSingleDreamVideoWithKey(
+/**
+ * Generate one 6s clip.
+ * - clipIndex 0 uses image-to-video if identity is present (strongest lock)
+ * - clipIndex > 0 uses text-to-video with a reference image hint (when supported)
+ */
+async function generateSingleClip(
   prompt: string,
-  apiKeyIndex: number = 0,
-  imageUri?: string
+  apiKeyIndex: number,
+  identityDataUrl?: string,
+  clipIndex: number = 0
 ): Promise<{ videoUrl: string; coverUrl: string | null }> {
   const apiKey = getApiKey(apiKeyIndex);
+  const useImageToVideo = !!identityDataUrl && clipIndex === 0;
 
-  console.log(`🎬 [DREAM AI ${apiKeyIndex + 1}] Creating dream sequence...`);
-  console.log(`📝 Scene: ${prompt.slice(0, 50)}...`);
-  console.log(`🔑 Using Dream Engine ${apiKeyIndex + 1}`);
+  const endpoint = useImageToVideo
+    ? `https://fal.run/fal-ai/minimax/${ENGINE}/standard/image-to-video`
+    : `https://fal.run/fal-ai/minimax/${ENGINE}/standard/text-to-video`;
 
-  try {
-    let endpoint: string;
-    let requestBody: any;
+  const body: any = { prompt: String(prompt) };
 
-    if (imageUri && apiKeyIndex === 0) {
-      // Dream AI image-to-video for person consistency
-      console.log('📷 [DREAM AI] Adding your person to the dream...');
-
-      const base64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // Internal endpoint (hidden from user)
-      endpoint = 'https://fal.run/fal-ai/minimax/hailuo-02/standard/image-to-video';
-      requestBody = {
-        prompt: prompt,
-        image_url: `data:image/jpeg;base64,${base64}`,
-      };
+  if (identityDataUrl) {
+    if (useImageToVideo) {
+      body.image_url = identityDataUrl; // Hailuo accepts data URLs
     } else {
-      // Dream AI text-to-video
-      console.log('📝 [DREAM AI] Generating dream visuals...');
-
-      // Internal endpoint (hidden from user)
-      endpoint = 'https://fal.run/fal-ai/minimax/hailuo-02/standard/text-to-video';
-      requestBody = {
-        prompt: prompt,
-      };
+      body.reference_images = [identityDataUrl]; // harmless if engine ignores
+      body.identity_hint =
+        'Keep the same main person (face, hair, body build) consistent across shots.';
     }
-
-    console.log(`🚀 [DREAM AI ${apiKeyIndex + 1}] Processing dream sequence...`);
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Key ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ [DREAM AI ${apiKeyIndex + 1}] Processing Error:`, response.status, errorText);
-
-      if (response.status === 402) {
-        throw new Error(`Insufficient Dream AI credits on engine ${apiKeyIndex + 1}`);
-      } else if (response.status === 401) {
-        throw new Error(`Dream AI configuration error ${apiKeyIndex + 1}`);
-      }
-
-      throw new Error(`Dream AI processing error: ${response.status}`);
-    }
-
-    const result = await response.json();
-    console.log('🔍 [DREAM AI] Processing complete');
-
-    // Handle response format
-    const remoteVideoUrl: string | undefined =
-      result.video?.url || result.url || result.data?.url || result.video_url;
-
-    if (!remoteVideoUrl) {
-      console.error('❌ No video URL found in Dream AI response');
-      throw new Error('Dream AI generation incomplete');
-    }
-
-    console.log(`✅ [DREAM AI ${apiKeyIndex + 1}] Dream sequence created successfully!`);
-    console.log('🎥 Dream ready for viewing');
-    console.log('✨ Dream quality: Cinema HD');
-
-    // Download video locally for better playback + native stitching
-    const localFileName = `dream_${apiKeyIndex + 1}_${Date.now()}.mp4`;
-    const localPath = `${FileSystem.documentDirectory}${localFileName}`;
-
-    console.log(`⬇️ [DREAM AI ${apiKeyIndex + 1}] Saving dream locally...`);
-    const downloadResult = await FileSystem.downloadAsync(remoteVideoUrl, localPath);
-    console.log(`📁 Dream saved: ${downloadResult.uri}`);
-
-    // Try to generate thumbnail
-    let coverUrl: string | null = null;
-    try {
-      coverUrl = await extractVideoThumbnail(downloadResult.uri);
-      if (coverUrl) console.log('🖼️ Dream preview generated');
-    } catch {
-      console.warn('⚠️ Preview generation skipped');
-    }
-
-    return {
-      videoUrl: downloadResult.uri, // local file:// URI
-      coverUrl,
-    };
-  } catch (error: any) {
-    console.error(`❌ [DREAM AI ${apiKeyIndex + 1}] Generation failed:`, error);
-    throw new Error(`Dream AI Engine ${apiKeyIndex + 1} failed: ${error.message}`);
   }
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Key ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Engine ${apiKeyIndex + 1} failed ${res.status}: ${text}`);
+  }
+
+  const json = await res.json();
+  const remote: string | undefined =
+    json.video?.url || json.url || json.data?.url || json.video_url;
+  if (!remote) throw new Error('No video url in response');
+
+  const local = `${FileSystem.documentDirectory}dream_${apiKeyIndex + 1}_${Date.now()}.mp4`;
+  const dl = await FileSystem.downloadAsync(remote, local);
+
+  const coverUrl = await extractVideoThumbnail(dl.uri).catch(() => null);
+
+  return { videoUrl: dl.uri, coverUrl: coverUrl ?? null };
 }
 
-// PARALLEL 3-CLIP DREAM CINEMA GENERATION
+// ====== PUBLIC API ======
+
 export async function generate3ClipDreamCinemaParallel(
   fullPrompt: string,
-  imageUri?: string,
+  localFaceImageUri?: string,
   onProgress?: (completed: number, total: number, step: string) => void
 ): Promise<{
   videoUrls: string[];
@@ -161,156 +102,99 @@ export async function generate3ClipDreamCinemaParallel(
   totalCost: number;
   generationTime: number;
 }> {
-  const startTime = Date.now();
-  console.log('🚀 [DREAM AI] Starting dream cinema creation...');
-  console.log('⚡ Dream AI Cinema Engine v2.0 - Ultra-fast processing');
-  console.log('✨ Creating your personalized dream experience');
+  const start = Date.now();
 
-  try {
-    // Step 1: Split prompt into 3 acts
-    onProgress?.(0, 3, 'Dream AI is analyzing your story...');
-    const acts = await splitPromptInto3Acts(fullPrompt, !!imageUri);
-    console.log('📝 [DREAM AI] Story structured into cinematic acts');
-
-    // Step 2: Generate all 3 videos in parallel
-    onProgress?.(0, 3, 'Dream AI is creating your scenes...');
-    console.log('🎬 [DREAM AI] Rendering dream sequences simultaneously...');
-
-    const generationPromises = acts.map((act, index) =>
-      generateSingleDreamVideoWithKey(
-        act,
-        index, // Use different API key for each video
-        index === 0 ? imageUri : undefined // Only first video gets image for character consistency
-      )
-        .then((result) => {
-          console.log(`✅ [DREAM AI] Sequence ${index + 1}/3 completed`);
-          onProgress?.(index + 1, 3, `Dream sequence ${index + 1}/3 ready`);
-          return result;
-        })
-        .catch((error) => {
-          console.error(`❌ [DREAM AI] Sequence ${index + 1} failed:`, error);
-          throw new Error(`Dream sequence ${index + 1} failed: ${error.message}`);
-        })
-    );
-
-    // Wait for all videos to complete
-    const videoResults = await Promise.all(generationPromises);
-
-    const generationTime = Date.now() - startTime;
-    console.log(`⚡ [DREAM AI] All sequences created in ${Math.round(generationTime / 1000)}s`);
-
-    const videoUrls = videoResults.map((r) => r.videoUrl); // local file:// URIs
-    const firstCover = videoResults[0]?.coverUrl ?? null;
-
-    // Step 3: Stitch videos (Native first → Cloudinary fallback)
-    onProgress?.(3, 3, 'Dream AI is finalizing your cinema...');
-    console.log('🎬 [DREAM AI] Combining sequences into cinematic experience...');
-
-    let stitchedVideoUrl = videoUrls[0]; // default fallback if both methods fail
-
+  // Prepare identity as a DATA URL once
+  let identityDataUrl: string | undefined;
+  if (localFaceImageUri) {
     try {
-      // ✅ Native: expects local file:// URIs
-      stitchedVideoUrl = await stitchNative(videoUrls);
-      console.log('✅ [NATIVE] dream cinema created (local)');
+      identityDataUrl = await getOrCreateIdentityImageUrl(localFaceImageUri);
+      console.log('🪪 Identity prepared (data URL)');
     } catch (e) {
-      console.warn('⚠️ Native stitching failed, falling back to Cloudinary splice', e);
-      try {
-        // Cloudinary splice expects exactly 3 sources (file:// or https://)
-        const clips = [videoUrls[0], videoUrls[1], videoUrls[2]] as [string, string, string];
-        stitchedVideoUrl = await stitchClips(clips, (step) => console.log(`🔧 [DREAM AI] ${step}`));
-        console.log('✅ [CLOUDINARY] dream cinema created');
-      } catch (cloudErr) {
-        console.error('❌ Both native and Cloudinary stitching failed; using first clip', cloudErr);
-      }
+      console.warn('Identity prep failed; continuing without reference.', e);
     }
-
-    const totalTime = Date.now() - startTime;
-
-    console.log(`🎉 [DREAM AI SUCCESS] Dream cinema completed in ${Math.round(totalTime / 1000)}s`);
-    console.log(`✨ Your dream is ready to experience!`);
-
-    return {
-      videoUrls,
-      stitchedVideoUrl,
-      coverUrl: firstCover,
-      totalCost: 0.81, // Internal cost tracking
-      generationTime: totalTime,
-    };
-  } catch (error: any) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ [DREAM AI] Failed after ${Math.round(totalTime / 1000)}s:`, error);
-    throw new Error(`Dream AI cinema generation failed: ${error.message}`);
   }
+
+  // 1) Split into acts
+  onProgress?.(0, 3, 'Dream AI is analyzing your story...');
+  const acts = await splitPromptInto3Acts(fullPrompt, !!identityDataUrl);
+  onProgress?.(0, 3, 'Dream AI is creating your scenes...');
+
+  // 2) Generate 3 clips in parallel
+  const promises = acts.map((act, idx) =>
+    generateSingleClip(act, idx, identityDataUrl, idx).then((r) => {
+      onProgress?.(idx + 1, 3, `Dream sequence ${idx + 1}/3 ready`);
+      return r;
+    })
+  );
+
+  const results = await Promise.all(promises);
+  const videoUrls = results.map((r) => r.videoUrl);
+  const coverUrl = results[0]?.coverUrl ?? null;
+
+  // 3) Stitch (native → cloud)
+  onProgress?.(3, 3, 'Dream AI is finalizing your cinema...');
+  let stitchedVideoUrl = videoUrls[0];
+  try {
+    stitchedVideoUrl = await stitchNative(videoUrls); // will throw → cloud fallback
+    console.log('✅ [NATIVE] stitched');
+  } catch {
+    console.warn('Native stitch failed, using Cloudinary');
+    stitchedVideoUrl = await stitchWithCloudinary(videoUrls, true);
+    console.log('✅ [CLOUDINARY] stitched');
+  }
+
+  const generationTime = Date.now() - start;
+  return {
+    videoUrls,
+    stitchedVideoUrl,
+    coverUrl,
+    totalCost: 0,
+    generationTime,
+  };
 }
 
-// Enhanced prompt splitting for Dream AI
-async function splitPromptInto3Acts(
-  fullPrompt: string,
-  hasFace: boolean
-): Promise<string[]> {
-  const openaiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+// ===== Splitter (OpenAI with fallback) =====
 
-  if (!openaiKey) {
-    console.log('⚠️ Using Dream AI auto-split');
+async function splitPromptInto3Acts(fullPrompt: string, hasFace: boolean): Promise<string[]> {
+  const key = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  if (!key) {
     return [
       `${fullPrompt}. OPENING SCENE: Wide establishing cinematic shot introducing the environment and character with atmospheric lighting and mood.`,
-      `${fullPrompt}. MAIN ACTION: Dynamic medium shot capturing the primary movement and story development with smooth camera work.`,
+      `${fullPrompt}. MAIN ACTION: Medium shot capturing the primary movement and story development with smooth camera work.`,
       `${fullPrompt}. CLIMAX MOMENT: Close-up emotional conclusion showing character reaction with dramatic depth of field and lighting.`,
     ];
   }
 
   try {
-    console.log('🤖 Dream AI is creating cinematic structure...');
+    const system = `Create 3 cinematic prompts for 6-second clips with continuity.
+Include camera motion, lighting, environment, and realistic movement.
+${hasFace ? 'Keep the SAME main person recognizable across acts.' : ''}
 
-    const systemPrompt = `Create 3 video prompts for Dream AI Cinema Engine. Each prompt will generate a 6-second dream sequence.
+Return JSON: {"acts": ["act1", "act2", "act3"]}`;
 
-Requirements for Dream AI:
-- Each prompt must be detailed and cinematic
-- Include specific camera movements and angles  
-- Rich visual descriptions for dream-like quality
-- Character consistency across all 3 scenes
-${hasFace ? '- Maintain the same person appearance in all scenes' : ''}
-- Each scene should feel like part of a complete dream story
-
-Structure:
-- Act 1: Wide establishing shot introducing setting and character
-- Act 2: Medium shot with main action or character development
-- Act 3: Close-up emotional climax or resolution
-
-Return JSON: {"acts": ["detailed_act1", "detailed_act2", "detailed_act3"]}`;
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Create 3 Dream AI cinema acts: "${fullPrompt}"` },
+          { role: 'system', content: system },
+          { role: 'user', content: fullPrompt },
         ],
-        max_tokens: 800,
         temperature: 0.7,
+        max_tokens: 700,
       }),
     });
 
-    if (response.ok) {
-      const result = await response.json();
-      const parsed = JSON.parse(result.choices[0]?.message?.content || '{}');
-
-      if (parsed.acts && Array.isArray(parsed.acts) && parsed.acts.length === 3) {
-        console.log('✅ Dream AI structured your story perfectly');
-        return parsed.acts;
-      }
-    }
-
-    throw new Error('AI structuring incomplete');
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    const content = data.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed.acts) && parsed.acts.length === 3) return parsed.acts;
+    throw new Error('bad format');
   } catch {
-    console.warn('⚠️ Using Dream AI fallback structure');
-
     return [
       `${fullPrompt} - ESTABLISHING: Wide cinematic shot introducing the full dream scene with professional lighting and atmosphere.`,
       `${fullPrompt} - DEVELOPMENT: Medium shot capturing dynamic dream action with smooth camera movement and character focus.`,
@@ -319,58 +203,14 @@ Return JSON: {"acts": ["detailed_act1", "detailed_act2", "detailed_act3"]}`;
   }
 }
 
-// Legacy compatibility - redirects to Dream AI
+// Legacy wrapper
 export async function generateVideoFal(
   prompt: string,
-  durationSeconds: number = 8,
+  _durationSeconds: number = 8,
   imageUri?: string
 ): Promise<{ videoUrl: string; coverUrl: string | null }> {
-  console.log('🔄 [DREAM AI] Initializing cinema generation...');
-
-  const result = await generate3ClipDreamCinemaParallel(prompt, imageUri);
-
-  return {
-    videoUrl: result.stitchedVideoUrl,
-    coverUrl: result.coverUrl,
-  };
-}
-
-// Check if Dream AI is properly configured
-export function checkParallelSetup(): {
-  configured: boolean;
-  availableKeys: number;
-  missingKeys: string[];
-} {
-  const availableKeys = FAL_API_KEYS.filter((key) => !!key).length;
-  const missingKeys: string[] = [];
-
-  if (!FAL_API_KEYS[0]) missingKeys.push('DREAM_AI_KEY_1');
-  if (!FAL_API_KEYS[1]) missingKeys.push('DREAM_AI_KEY_2');
-  if (!FAL_API_KEYS[2]) missingKeys.push('DREAM_AI_KEY_3');
-
-  return {
-    configured: availableKeys >= 3,
-    availableKeys,
-    missingKeys,
-  };
-}
-
-// Check Dream AI service status
-export async function checkDreamAIStatus(): Promise<boolean> {
-  const apiKey = getApiKey(0);
-
-  try {
-    const response = await fetch('https://fal.run/health', {
-      method: 'GET',
-      headers: {
-        Authorization: `Key ${apiKey}`,
-      },
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  }
+  const res = await generate3ClipDreamCinemaParallel(prompt, imageUri);
+  return { videoUrl: res.stitchedVideoUrl, coverUrl: res.coverUrl };
 }
 
 export { extractVideoThumbnail };

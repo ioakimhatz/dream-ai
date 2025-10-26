@@ -1,4 +1,3 @@
-// app/(auth)/onboarding.tsx - PSYCHOLOGICAL DREAM QUESTIONS
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -6,6 +5,8 @@ import React, { useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
+  Image,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -15,134 +16,110 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
+// ---- SAFETY NET: guard all icons so missing glyphs don't crash a step ----
+const hasGlyph = (name: string) => (Ionicons as any)?.glyphMap?.[name] != null;
+const SafeIonicon = ({ name, size, color }: { name: string; size: number; color: string }) => {
+  const safe = hasGlyph(name) ? name : 'star';
+  return <Ionicons name={safe as any} size={size} color={color} />;
+};
+// -------------------------------------------------------------------------
+
 const QUESTIONS = [
+  { id: 'math_breakdown', question: 'Your day is split\ninto three parts', subtitle: "Let's break down your 24 hours", type: 'math' },
+  { id: 'sleep_third', question: 'You sleep\n1/3 of your life', subtitle: "That's 8 hours every single day" },
+  { id: 'photos_app', question: 'You have Photos\nfor your everyday life', subtitle: "Thousands of memories from when you're awake", type: 'photos_icon' },
+  { id: 'dream_ai_reveal', question: 'Why not have one\nfor your other 1/3?', subtitle: 'Introducing memories from your sleep', type: 'dream_icon' },
   {
-    id: 'sleep_hours',
-    question: 'How many hours do you\nsleep per night?',
-    subtitle: 'We spend 1/3 of our lives asleep',
-    options: [
-      { icon: 'moon', text: '8-10 hours' },
-      { icon: 'moon-outline', text: '6-8 hours' },
-      { icon: 'partly-sunny', text: '5 or less' },
-      { icon: 'cafe', text: 'It varies' },
-    ],
+    id: 'science',
+    type: 'science',
+    question: 'Why do dreams disappear\nso quickly?',
+    subtitle: 'The neuroscience behind dream memory',
+    facts: [
+      { icon: 'flash', title: '5-10 Minute Window', description: 'Dreams live in short-term memory. They vanish unless captured immediately upon waking.', stat: '95% forgotten' },
+      { icon: 'cellular', title: 'Brain Chemistry', description: 'During REM sleep, your hippocampus (memory center) is partially shut down. Dreams never reach long-term storage.', stat: 'Harvard Study' },
+      { icon: 'time', title: 'The Golden Window', description: 'The first 90 seconds after waking are critical. Voice recording beats typing by 3x for dream recall.', stat: '3x better recall' }
+    ]
   },
   {
-    id: 'realization',
-    question: 'That\'s 2,920 hours per year\nin dreams you\'ll never remember',
-    subtitle: 'You have photos for your waking memories. Why not your dreams?',
-    options: [
-      { icon: 'camera', text: 'I want to capture them forever' },
-      { icon: 'videocam', text: 'Turn them into movies' },
-      { icon: 'trash-outline', text: 'Let 2,920 hours vanish' },
-    ],
+    id: 'prompt_examples',
+    type: 'examples',
+    question: 'How to describe your\ndreams for best results',
+    subtitle: 'AI creates better videos from vivid descriptions',
+    examples: [
+      { quality: 'weak', icon: 'close-circle', prompt: 'I had a dream', why: 'Too vague - AI needs details' },
+      { quality: 'good', icon: 'checkmark-circle', prompt: 'I was flying over mountains at sunset', why: 'Clear scene + action + setting' },
+      { quality: 'amazing', icon: 'star', prompt: 'I was racing a red Ferrari through neon-lit Tokyo streets at midnight in the rain', why: 'Vivid details = cinematic results' }
+    ]
   },
+  { id: 'how_it_works', question: 'Voice record your dream\nthe moment you wake up', subtitle: 'AI transforms your voice into a cinematic video' },
   {
-    id: 'dream_frequency',
-    question: 'You dream 4-6 times every night.\nHow many do you remember?',
-    subtitle: '95% of dreams vanish within 5 minutes of waking',
-    options: [
-      { icon: 'sparkles', text: 'Maybe one per week' },
-      { icon: 'cloud-outline', text: 'Fragments and feelings' },
-      { icon: 'help-circle-outline', text: 'Almost nothing' },
-      { icon: 'skull-outline', text: 'They\'re all dead to me' },
-    ],
+    id: 'preview',
+    type: 'preview',
+    question: 'Your first dream will be\na 15-second cinematic video',
+    subtitle: 'AI will create 3 scenes from your description',
+    preview: { scenes: ['Opening scene', 'Main action', 'Epic finale'], duration: '15 seconds', quality: 'HD cinematic' }
   },
-  {
-    id: 'dream_capture',
-    question: 'What if AI could capture\nyour dreams while you sleep?',
-    subtitle: 'Record your dream the moment you wake up',
-    options: [
-      { icon: 'mic', text: 'Voice record instantly' },
-      { icon: 'bed', text: 'Capture while half-asleep' },
-      { icon: 'close-circle', text: 'Keep forgetting forever' },
-    ],
-  },
-  {
-    id: 'transformation',
-    question: 'Your dreams cost you\n10,000 lost memories per lifetime',
-    subtitle: 'Every night you\'re creating stories you\'ll never see',
-    options: [
-      { icon: 'film', text: 'Save my dream movies' },
-      { icon: 'book', text: 'Build my dream library' },
-      { icon: 'ban', text: 'Waste another 10,000' },
-    ],
-  },
-  {
-    id: 'final_hook',
-    question: 'While you slept last night,\n6 dreams disappeared forever',
-    subtitle: 'Your brain created masterpieces. Gone.',
-    options: [
-      { icon: 'recording', text: 'Start recording tonight' },
-      { icon: 'analytics', text: 'Decode my subconscious' },
-      { icon: 'sad-outline', text: 'Accept the loss' },
-    ],
-  }
+  { id: 'final', question: 'Ready to capture\nyour dream memories?', subtitle: 'Start building your complete memory library tonight' }
 ];
 
 export default function OnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, number>>({});
-  const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-  });
-
-  if (!fontsLoaded) {
-    return null;
-  }
-
-  const handleSelectOption = (index: number) => {
-    setSelectedOptions(prev => ({
-      ...prev,
-      [QUESTIONS[currentStep].id]: index
-    }));
-
-    // Auto-advance after selection
-    setTimeout(() => {
-      handleContinue();
-    }, 300);
-  };
+  const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+  if (!fontsLoaded) return null;
 
   const handleContinue = () => {
     if (currentStep < QUESTIONS.length - 1) {
-      // Fade out
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        setCurrentStep(currentStep + 1);
-        // Fade in
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+        const nextStep = currentStep + 1;
+        setCurrentStep(nextStep);
+        
+        // Dream AI screen (index 3) - NO scale animation (causes Image rendering issues)
+        if (nextStep === 3) {
+          scaleAnim.setValue(1);
+          Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+        }
+        // Photos screen (index 2) - animate scale for pop effect
+        else if (nextStep === 2) {
+          scaleAnim.setValue(0.8);
+          Animated.parallel([
+            Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.spring(scaleAnim, { toValue: 1, friction: 8, tension: 40, useNativeDriver: true })
+          ]).start();
+        }
+        // All other screens - just fade in smoothly
+        else {
+          scaleAnim.setValue(1);
+          Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+        }
       });
     } else {
-      router.push('/(auth)/auth-select');
+      router.push('/auth-select');
     }
   };
 
   const handleBack = () => {
     if (currentStep > 0) {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        setCurrentStep(currentStep - 1);
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+        const prevStep = currentStep - 1;
+        setCurrentStep(prevStep);
+        
+        // Same logic for going back
+        if (prevStep === 3) {
+          scaleAnim.setValue(1);
+          Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+        } else if (prevStep === 2) {
+          scaleAnim.setValue(0.8);
+          Animated.parallel([
+            Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.spring(scaleAnim, { toValue: 1, friction: 8, tension: 40, useNativeDriver: true })
+          ]).start();
+        } else {
+          scaleAnim.setValue(1);
+          Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+        }
       });
     } else {
       router.back();
@@ -150,250 +127,360 @@ export default function OnboardingScreen() {
   };
 
   const progress = ((currentStep + 1) / QUESTIONS.length) * 100;
-  const current = QUESTIONS[currentStep];
-  const selectedIndex = selectedOptions[current.id];
+  const current = QUESTIONS[currentStep] || QUESTIONS[0];
+  
+  if (!current) {
+    console.error('❌ Current step is undefined:', currentStep);
+    return null;
+  }
 
-  // Special rendering for realization screen
-  const isRealizationScreen = currentStep === 1;
-
-  // Check if last option (negative option) is selected
-  const isNegativeOption = selectedIndex === current.options.length - 1;
+  const isScienceScreen = current.type === 'science';
+  const isExamplesScreen = current.type === 'examples';
+  const isPreviewScreen = current.type === 'preview';
+  const isMathScreen = current.type === 'math';
+  const isPhotosIconScreen = current.type === 'photos_icon';
+  const isDreamIconScreen = current.type === 'dream_icon';
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        {/* iOS Back Arrow */}
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={handleBack}
-        >
-          <Ionicons name="chevron-back" size={28} color="#000" />
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <SafeIonicon name="chevron-back" size={28} color="#000" />
         </TouchableOpacity>
 
-        {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View
-              style={[styles.progressFill, { width: `${progress}%` }]}
-            />
+            <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
         </View>
       </View>
 
-      <Animated.View style={[
-        styles.content,
-        { opacity: fadeAnim }
-      ]}>
-        {/* Show diagram for sleep calculation */}
-        {isRealizationScreen && (
-          <View style={styles.diagramContainer}>
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>8</Text>
-              <Text style={styles.statLabel}>hours/night</Text>
-            </View>
-            <Text style={styles.multiply}>×</Text>
-            <View style={styles.statBox}>
-              <Text style={styles.statNumber}>365</Text>
-              <Text style={styles.statLabel}>days/year</Text>
-            </View>
-            <Text style={styles.equals}>=</Text>
-            <View style={styles.statBox}>
-              <Text style={[styles.statNumber, styles.highlightNumber]}>2,920</Text>
-              <Text style={styles.statLabel}>lost hours</Text>
-            </View>
-          </View>
-        )}
+      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* MATH */}
+          {isMathScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.mathContainer}>
+                <View style={styles.mathRow}>
+                  <View style={styles.mathBox}>
+                    <SafeIonicon name="moon" size={40} color="#7E78EA" />
+                    <Text style={styles.mathNumber}>8</Text>
+                    <Text style={styles.mathLabel}>Sleep</Text>
+                  </View>
+                  <Text style={styles.mathPlus}>+</Text>
+                  <View style={styles.mathBox}>
+                    <SafeIonicon name="briefcase" size={40} color="#4ECDC4" />
+                    <Text style={styles.mathNumber}>8</Text>
+                    <Text style={styles.mathLabel}>Work</Text>
+                  </View>
+                  <Text style={styles.mathPlus}>+</Text>
+                  <View style={styles.mathBox}>
+                    <SafeIonicon name="happy" size={40} color="#FFD93D" />
+                    <Text style={styles.mathNumber}>8</Text>
+                    <Text style={styles.mathLabel}>Life</Text>
+                  </View>
+                </View>
+                <View style={styles.mathEquals}><Text style={styles.equalsText}>=</Text></View>
+                <View style={styles.mathTotal}>
+                  <Text style={styles.totalNumber}>24</Text>
+                  <Text style={styles.totalLabel}>hours in your day</Text>
+                </View>
+              </View>
+            </>
+          )}
 
-        {/* Question */}
-        <View style={styles.questionContainer}>
-          <Text style={styles.question}>{current.question}</Text>
-          <Text style={styles.subtitle}>{current.subtitle}</Text>
-        </View>
+          {/* PHOTOS ICON */}
+          {isPhotosIconScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.iconContainer}>
+                <Animated.View style={[styles.appIconWrapper, { transform: [{ scale: scaleAnim }] }]}>
+                  <View style={styles.photosAppIcon}>
+                    <SafeIonicon name="image" size={80} color="#FFF" />
+                  </View>
+                  <Text style={styles.appIconLabel}>Photos</Text>
+                </Animated.View>
 
-        {/* Options */}
-        <View style={styles.optionsContainer}>
-          {current.options.map((option, index) => {
-            const isLastOption = index === current.options.length - 1;
-            const isSelected = selectedIndex === index;
-            
-            return (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.optionButton,
-                  isSelected && (isLastOption ? styles.negativeButtonSelected : styles.optionButtonSelected),
-                  isLastOption && styles.negativeButton
-                ]}
-                onPress={() => handleSelectOption(index)}
-                activeOpacity={0.7}
-              >
-                <Ionicons 
-                  name={option.icon as any} 
-                  size={24} 
-                  color={
-                    isSelected 
-                      ? '#FFFFFF' 
-                      : isLastOption 
-                        ? '#999' 
-                        : '#000'
-                  } 
-                  style={styles.optionIcon}
-                />
-                <Text style={[
-                  styles.optionText,
-                  isLastOption && styles.negativeText,
-                  isSelected && styles.optionTextSelected
-                ]}>
-                  {option.text}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                <View style={styles.iconStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>2/3</Text>
+                    <Text style={styles.statLabel}>of your life</Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>16hrs</Text>
+                    <Text style={styles.statLabel}>every day</Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+
+          {/* DREAM ICON - NO SCALE ANIMATION (Image rendering issue) */}
+          {isDreamIconScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.iconContainer}>
+                <View style={styles.appIconWrapper}>
+                  <View style={styles.dreamAppIcon}>
+                    <Image
+                      source={require('../../assets/images/logodreamai.png')}
+                      style={{
+                        width: 120,
+                        height: 120,
+                        resizeMode: 'contain',
+                      }}
+                    />
+                  </View>
+                  <Text style={styles.appIconLabel}>Dream AI</Text>
+                </View>
+
+                <View style={styles.iconStats}>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, styles.highlightStat]}>1/3</Text>
+                    <Text style={styles.statLabel}>of your life</Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, styles.highlightStat]}>8hrs</Text>
+                    <Text style={styles.statLabel}>every night</Text>
+                  </View>
+                </View>
+
+                <View style={styles.revelationBox}>
+                  <SafeIonicon name="bulb" size={24} color="#FFD93D" />
+                  <Text style={styles.revelationText}>A whole new memory library</Text>
+                </View>
+              </View>
+            </>
+          )}
+
+          {/* REGULAR QUESTION */}
+          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && (
+            <View style={styles.questionContainer}>
+              <Text style={styles.question}>{current.question}</Text>
+              <Text style={styles.subtitle}>{current.subtitle}</Text>
+            </View>
+          )}
+
+          {/* SCIENCE */}
+          {isScienceScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.scienceContainer}>
+                {current.facts.map((fact, index) => (
+                  <View key={index} style={styles.factCard}>
+                    <View style={styles.factHeader}>
+                      <View style={styles.factIconContainer}>
+                        <SafeIonicon name={fact.icon as any} size={24} color="#7E78EA" />
+                      </View>
+                      <View style={styles.factTitleContainer}>
+                        <Text style={styles.factTitle}>{fact.title}</Text>
+                        <View style={styles.factBadge}><Text style={styles.factBadgeText}>{fact.stat}</Text></View>
+                      </View>
+                    </View>
+                    <Text style={styles.factDescription}>{fact.description}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* EXAMPLES */}
+          {isExamplesScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.examplesContainer}>
+                {current.examples.map((example, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.exampleCard,
+                      example.quality === 'weak' && styles.exampleWeak,
+                      example.quality === 'good' && styles.exampleGood,
+                      example.quality === 'amazing' && styles.exampleAmazing,
+                    ]}
+                  >
+                    <View style={styles.exampleHeader}>
+                      <SafeIonicon
+                        name={example.icon as any}
+                        size={28}
+                        color={example.quality === 'weak' ? '#FF6B6B' : example.quality === 'good' ? '#4ECDC4' : '#FFD93D'}
+                      />
+                      <Text
+                        style={[
+                          styles.exampleQuality,
+                          example.quality === 'weak' && styles.qualityWeak,
+                          example.quality === 'good' && styles.qualityGood,
+                          example.quality === 'amazing' && styles.qualityAmazing,
+                        ]}
+                      >
+                        {example.quality.toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={styles.examplePrompt}>"{example.prompt}"</Text>
+                    <Text style={styles.exampleWhy}>{example.why}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* PREVIEW */}
+          {isPreviewScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+              <View style={styles.previewContainer}>
+                <View style={styles.videoPreview}>
+                  <SafeIonicon name="film" size={48} color="#7E78EA" />
+                  <Text style={styles.previewDuration}>{current.preview.duration}</Text>
+                  <Text style={styles.previewQuality}>{current.preview.quality}</Text>
+                </View>
+                <View style={styles.scenesContainer}>
+                  {current.preview.scenes.map((scene, index) => (
+                    <View key={index} style={styles.sceneItem}>
+                      <View style={styles.sceneNumber}><Text style={styles.sceneNumberText}>{index + 1}</Text></View>
+                      <Text style={styles.sceneText}>{scene}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.previewFeatures}>
+                  <View style={styles.featureItem}>
+                    <SafeIonicon name="videocam" size={20} color="#7E78EA" />
+                    <Text style={styles.featureText}>HD Quality</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <SafeIonicon name="musical-notes" size={20} color="#7E78EA" />
+                    <Text style={styles.featureText}>Sound Effects</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <SafeIonicon name="sparkles" size={20} color="#7E78EA" />
+                    <Text style={styles.featureText}>AI Enhanced</Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+
+          {/* CONTINUE BUTTON */}
+          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+            <Text style={styles.continueButtonText}>
+              {isScienceScreen ? 'Got it! Continue' : isExamplesScreen ? 'I understand' : isPreviewScreen ? 'Ready to create!' : 'Continue'}
+            </Text>
+            <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
+          </TouchableOpacity>
+        </ScrollView>
       </Animated.View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingTop: 10, paddingBottom: 20 },
+  backButton: { padding: 4, marginRight: 12, marginLeft: -8 },
+  progressContainer: { flex: 1 },
+  progressBar: { height: 3, backgroundColor: '#F0F0F0', borderRadius: 1.5, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#7E78EA', borderRadius: 1.5 },
+  content: { flex: 1, paddingHorizontal: 24, paddingVertical: 20 },
+  scrollContent: { 
+    flexGrow: 1, 
+    paddingBottom: 40,
+    paddingTop: 20,
+    minHeight: 500
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 10,
-    paddingBottom: 20,
-  },
-  backButton: {
-    padding: 4,
-    marginRight: 12,
-    marginLeft: -8,
-  },
-  progressContainer: {
-    flex: 1,
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#7E78EA',
-    borderRadius: 1.5,
-  },
-  skipButton: {
-    padding: 4,
-    marginLeft: 12,
-  },
-  skipText: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#666',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  diagramContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
-    paddingVertical: 20,
-    backgroundColor: '#F8F8F8',
-    borderRadius: 16,
-  },
-  statBox: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 28,
-    fontFamily: 'Inter_700Bold',
-    color: '#000',
-  },
-  highlightNumber: {
-    color: '#7E78EA',
-  },
-  statLabel: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    color: '#666',
-    marginTop: 4,
-  },
-  multiply: {
-    fontSize: 20,
-    fontFamily: 'Inter_400Regular',
-    color: '#666',
-    marginHorizontal: 15,
-  },
-  equals: {
-    fontSize: 20,
-    fontFamily: 'Inter_400Regular',
-    color: '#666',
-    marginHorizontal: 15,
-  },
-  questionContainer: {
-    marginBottom: 30,
-  },
-  question: {
-    fontSize: 32,
-    fontFamily: 'Inter_700Bold',
-    color: '#000',
-    lineHeight: 40,
-    letterSpacing: -0.5,
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    color: '#666',
-    lineHeight: 22,
-  },
-  optionsContainer: {
-    gap: 12,
-  },
-  optionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F8F8',
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  optionButtonSelected: {
-    backgroundColor: '#7E78EA',
-    borderColor: '#7E78EA',
-  },
-  negativeButton: {
-    backgroundColor: '#F5F5F5',
-    borderColor: '#E0E0E0',
-    borderWidth: 1,
-  },
-  negativeButtonSelected: {
-    backgroundColor: '#666',
-    borderColor: '#666',
-  },
-  optionIcon: {
-    marginRight: 16,
-    width: 24,
-  },
-  optionText: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#000',
-    flex: 1,
-  },
-  negativeText: {
-    color: '#999',
-  },
-  optionTextSelected: {
-    color: '#FFFFFF',
-  },
+  questionContainer: { marginBottom: 40 },
+  question: { fontSize: 32, fontFamily: 'Inter_700Bold', color: '#000', lineHeight: 40, letterSpacing: -0.5, marginBottom: 12, textAlign: 'center' },
+  subtitle: { fontSize: 16, fontFamily: 'Inter_400Regular', color: '#666', lineHeight: 24, textAlign: 'center' },
+
+  // Math
+  mathContainer: { alignItems: 'center', marginTop: 20 },
+  mathRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 30 },
+  mathBox: { alignItems: 'center', backgroundColor: '#F8F8F8', padding: 20, borderRadius: 16, minWidth: 90 },
+  mathNumber: { fontSize: 32, fontFamily: 'Inter_700Bold', color: '#000', marginTop: 8 },
+  mathLabel: { fontSize: 14, fontFamily: 'Inter_500Medium', color: '#666', marginTop: 4 },
+  mathPlus: { fontSize: 28, fontFamily: 'Inter_600SemiBold', color: '#666', marginHorizontal: 12 },
+  mathEquals: { marginVertical: 20 },
+  equalsText: { fontSize: 32, fontFamily: 'Inter_600SemiBold', color: '#666' },
+  mathTotal: { alignItems: 'center', backgroundColor: '#7E78EA', paddingVertical: 24, paddingHorizontal: 48, borderRadius: 20 },
+  totalNumber: { fontSize: 48, fontFamily: 'Inter_700Bold', color: '#FFF' },
+  totalLabel: { fontSize: 16, fontFamily: 'Inter_500Medium', color: '#FFF', marginTop: 4, opacity: 0.9 },
+
+  // Icons screens
+  iconContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  appIconWrapper: { alignItems: 'center', marginBottom: 30 },
+  photosAppIcon: { width: 120, height: 120, borderRadius: 28, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
+  dreamAppIcon: { width: 120, height: 120, borderRadius: 28, backgroundColor: '#7E78EA', alignItems: 'center', justifyContent: 'center', marginBottom: 16, shadowColor: '#7E78EA', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8 },
+  appIconLabel: { fontSize: 20, fontFamily: 'Inter_600SemiBold', color: '#000' },
+  iconStats: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F8F8', paddingVertical: 20, paddingHorizontal: 32, borderRadius: 16, gap: 24, marginBottom: 24 },
+  statItem: { alignItems: 'center' },
+  statNumber: { fontSize: 28, fontFamily: 'Inter_700Bold', color: '#000' },
+  highlightStat: { color: '#7E78EA' },
+  statLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', color: '#666', marginTop: 4 },
+  statDivider: { width: 1, height: 40, backgroundColor: '#DDD' },
+  revelationBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFEF0', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12, gap: 8, borderWidth: 1, borderColor: '#FFD93D' },
+  revelationText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: '#000' },
+
+  // Science
+  scienceContainer: { gap: 16 },
+  factCard: { backgroundColor: '#F8F8FF', borderRadius: 16, padding: 20, borderLeftWidth: 4, borderLeftColor: '#7E78EA' },
+  factHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
+  factIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  factTitleContainer: { flex: 1 },
+  factTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#000', marginBottom: 6 },
+  factBadge: { alignSelf: 'flex-start', backgroundColor: '#7E78EA', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  factBadgeText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
+  factDescription: { fontSize: 15, fontFamily: 'Inter_400Regular', color: '#333', lineHeight: 22 },
+
+  // Examples
+  examplesContainer: { gap: 16 },
+  exampleCard: { borderRadius: 16, padding: 20, borderWidth: 2 },
+  exampleWeak: { backgroundColor: '#FFF5F5', borderColor: '#FF6B6B' },
+  exampleGood: { backgroundColor: '#F0FFFF', borderColor: '#4ECDC4' },
+  exampleAmazing: { backgroundColor: '#FFFEF0', borderColor: '#FFD93D' },
+  exampleHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  exampleQuality: { fontSize: 12, fontFamily: 'Inter_700Bold', marginLeft: 8 },
+  qualityWeak: { color: '#FF6B6B' },
+  qualityGood: { color: '#4ECDC4' },
+  qualityAmazing: { color: '#FFA500' },
+  examplePrompt: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#000', marginBottom: 8, lineHeight: 22 },
+  exampleWhy: { fontSize: 14, fontFamily: 'Inter_400Regular', color: '#666', lineHeight: 20 },
+
+  // Preview
+  previewContainer: { gap: 20 },
+  videoPreview: { backgroundColor: '#F8F8FF', borderRadius: 16, padding: 32, alignItems: 'center', borderWidth: 2, borderColor: '#7E78EA', borderStyle: 'dashed' },
+  previewDuration: { fontSize: 24, fontFamily: 'Inter_700Bold', color: '#7E78EA', marginTop: 12 },
+  previewQuality: { fontSize: 14, fontFamily: 'Inter_500Medium', color: '#666', marginTop: 4 },
+  scenesContainer: { gap: 12 },
+  sceneItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F8F8', padding: 16, borderRadius: 12 },
+  sceneNumber: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#7E78EA', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  sceneNumberText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: '#FFF' },
+  sceneText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#000' },
+
+  previewFeatures: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16 },
+  featureItem: { alignItems: 'center', gap: 6 },
+  featureText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#666' },
+
+  // CTA
+  continueButton: { flexDirection: 'row', backgroundColor: '#7E78EA', paddingVertical: 18, paddingHorizontal: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 20 },
+  continueButtonText: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
 });

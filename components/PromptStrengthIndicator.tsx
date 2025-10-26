@@ -1,16 +1,12 @@
 // app/components/PromptStrengthIndicator.tsx
-import { analyzePromptStrength, getStrengthColor, getStrengthMessage } from 'app/utils/promptValidator';
+import { 
+  analyzePromptStrength, 
+  getStrengthColor, 
+  getStrengthMessage,
+  type PromptAnalysis // Use type import
+} from '@/app/utils/promptValidator';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-
-// EXPORT THE TYPE FROM HERE
-export interface PromptAnalysis {
-  strength: 'WEAK' | 'FAIR' | 'GOOD' | 'EXCELLENT';
-  score: number;
-  issues: string[];
-  suggestions: string[];
-  canGenerate: boolean;
-}
 
 interface Props {
   prompt: string;
@@ -25,10 +21,18 @@ export const PromptStrengthIndicator: React.FC<Props> = ({ prompt, onAnalysisCha
         score: 0,
         issues: ['Start typing your dream...'],
         suggestions: ['Describe who, what, where, and how you felt'],
-        canGenerate: false
+        canGenerate: false,
+        hasAdultContent: false
       };
     }
-    return analyzePromptStrength(prompt);
+    
+    const result = analyzePromptStrength(prompt);
+    
+    // DEBUG - Log the result
+    console.log('📊 Analysis result:', result);
+    console.log('📊 Has adult content?', result.hasAdultContent);
+    
+    return result;
   }, [prompt]);
 
   React.useEffect(() => {
@@ -38,18 +42,20 @@ export const PromptStrengthIndicator: React.FC<Props> = ({ prompt, onAnalysisCha
   const strengthColor = getStrengthColor(analysis);
   const strengthMessage = getStrengthMessage(analysis);
 
+  // DEBUG - Check if we should show the warning
+  console.log('🎨 Should show adult warning?', analysis.hasAdultContent);
+  console.log('🎨 Can generate?', analysis.canGenerate);
+
   return (
     <View style={styles.container}>
+      {/* Strength Bar */}
       <View style={styles.strengthBarContainer}>
         <Text style={styles.label}>Prompt Strength:</Text>
         <View style={styles.strengthBarBg}>
           <View 
             style={[
               styles.strengthBarFill, 
-              { 
-                width: `${analysis.score}%`, 
-                backgroundColor: strengthColor 
-              }
+              { width: `${analysis.score}%`, backgroundColor: strengthColor }
             ]} 
           />
         </View>
@@ -62,7 +68,24 @@ export const PromptStrengthIndicator: React.FC<Props> = ({ prompt, onAnalysisCha
         {strengthMessage}
       </Text>
 
-      {analysis.issues.length > 0 && (
+      {/* DEBUG: Force show if adult content detected */}
+      {analysis.hasAdultContent === true && (
+        <View style={styles.comingSoonContainer}>
+          <Text style={styles.comingSoonIcon}>✨</Text>
+          <View style={styles.comingSoonTextContainer}>
+            <Text style={styles.comingSoonTitle}>Coming Soon!</Text>
+            <Text style={styles.comingSoonText}>
+              This type of content is not currently available, but we're working on it!
+            </Text>
+            <Text style={styles.comingSoonHint}>
+              🔔 Stay tuned for future updates with expanded content options!
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Suggestions - Only show if NO adult content */}
+      {analysis.issues.length > 0 && !analysis.hasAdultContent && (
         <View style={styles.issuesContainer}>
           <Text style={styles.issuesTitle}>💡 Suggestions for better results:</Text>
           {analysis.suggestions.map((suggestion: string, index: number) => (
@@ -73,7 +96,8 @@ export const PromptStrengthIndicator: React.FC<Props> = ({ prompt, onAnalysisCha
         </View>
       )}
 
-      {!analysis.canGenerate && prompt.trim().length > 0 && (
+      {/* Generation Blocker - Only show if NO adult content */}
+      {!analysis.canGenerate && prompt.trim().length > 0 && !analysis.hasAdultContent && (
         <View style={styles.blockerContainer}>
           <Text style={styles.blockerText}>
             🚫 Prompt too weak - Add more details to generate amazing results
@@ -153,5 +177,40 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FF4444',
     textAlign: 'center',
+  },
+  comingSoonContainer: {
+    backgroundColor: '#EEF2FF',
+    padding: 14,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#7278E6',
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  comingSoonIcon: {
+    fontSize: 24,
+    marginRight: 10,
+    marginTop: 2,
+  },
+  comingSoonTextContainer: {
+    flex: 1,
+  },
+  comingSoonTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#4338CA',
+    marginBottom: 6,
+  },
+  comingSoonText: {
+    fontSize: 13,
+    color: '#4F46E5',
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  comingSoonHint: {
+    fontSize: 12,
+    color: '#6366F1',
+    fontStyle: 'italic',
   },
 });

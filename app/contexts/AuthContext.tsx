@@ -1,4 +1,4 @@
-// app/contexts/AuthContext.tsx - WITH EMAILJS INTEGRATION AND APPLE SIGN-IN FIXED
+// app/contexts/AuthContext.tsx - FIXED: Smart Apple name + Re-throws errors
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -7,7 +7,17 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import { EmailService } from '../../lib/emailjs-service';
 
-interface User {
+export type PlanId = 'free' | 'basic' | 'pro' | 'annual';
+
+export interface SubscriptionInfo {
+  plan: string;
+  isActive: boolean;
+  renewalDate?: Date;
+  dreamsRemaining: number;
+  totalDreams: number;
+}
+
+export interface User {
   id: string;
   email: string;
   name: string;
@@ -16,7 +26,7 @@ interface User {
     used: number;
     total: number;
     resetDate: number;
-    planId: 'free' | 'basic' | 'pro' | 'annual';
+    planId: PlanId;
   };
 }
 
@@ -24,22 +34,22 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   tempEmail: string | null;
+
   signInWithGoogle: () => Promise<void>;
-  signInWithApple?: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
   signOut: () => Promise<void>;
-  
-  // OTP Methods
+
   sendOTP: (email: string) => Promise<boolean>;
   verifyOTP: (code: string) => Promise<boolean>;
   resendOTP: () => Promise<boolean>;
-  
-  // Dream tracking methods
+
   useDream: () => Promise<boolean>;
   canGenerateDream: () => boolean;
   getDreamsRemaining: () => number;
-  updateSubscription: (planId: string, dreamsPerMonth: number) => Promise<void>;
+  updateSubscription: (subscriptionInfo: SubscriptionInfo) => Promise<void>;
+  updateUserName: (newName: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,126 +61,98 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [tempOTP, setTempOTP] = useState<string | null>(null);
 
   useEffect(() => {
-    checkAuthState();
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem('user');
+        if (saved) {
+          const parsed: User = JSON.parse(saved);
+          if (!parsed.dreamUsage) {
+            parsed.dreamUsage = {
+              used: 0,
+              total: 0,
+              resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+              planId: 'free',
+            };
+          }
+          setUser(parsed);
+        }
+      } catch (e) {
+        console.error('Auth rehydrate error:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    if (user?.dreamUsage) {
-      checkMonthlyReset();
-    }
-  }, [user]);
-
-  const checkAuthState = async () => {
-    try {
-      const savedUser = await AsyncStorage.getItem('user');
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
-        
-        if (!parsedUser.dreamUsage) {
-          parsedUser.dreamUsage = {
-            used: 0,
-            total: 0,
-            resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-            planId: 'free'
-          };
-        }
-        
-        setUser(parsedUser);
-      }
-    } catch (error) {
-      console.error('Error checking auth state:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    if (user?.dreamUsage) checkMonthlyReset();
+  }, [user?.dreamUsage?.resetDate]);
 
   const checkMonthlyReset = async () => {
     if (!user?.dreamUsage) return;
-    
     const now = Date.now();
     if (now > user.dreamUsage.resetDate) {
-      const updatedUser = {
+      const updated: User = {
         ...user,
         dreamUsage: {
           ...user.dreamUsage,
           used: 0,
-          resetDate: now + (30 * 24 * 60 * 60 * 1000)
-        }
+          resetDate: now + 30 * 24 * 60 * 60 * 1000,
+        },
       };
-      
-      setUser(updatedUser);
-      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-      
+      setUser(updated);
+      await AsyncStorage.setItem('user', JSON.stringify(updated));
       if (user.dreamUsage.total > 0) {
-        Alert.alert(
-          'Dreams Refreshed!',
-          `Your ${user.dreamUsage.total} monthly dreams have been reset.`
-        );
+        Alert.alert('Dreams Refreshed!', `Your ${user.dreamUsage.total} monthly dreams have been reset.`);
       }
     }
   };
 
-  // Send 4-digit OTP to email using EmailJS
   const sendOTP = async (email: string): Promise<boolean> => {
     try {
-      // Use EmailJS to send OTP
       const result = await EmailService.sendOTP(email);
-      
       if (result.success && result.otp) {
-        // Store OTP locally for verification
-        await AsyncStorage.setItem('temp_otp', result.otp);
-        await AsyncStorage.setItem('temp_otp_email', email);
-        await AsyncStorage.setItem('temp_otp_expires', (Date.now() + 10 * 60 * 1000).toString());
-        
+        await AsyncStorage.multiSet([
+          ['temp_otp', result.otp],
+          ['temp_otp_email', email],
+          ['temp_otp_expires', String(Date.now() + 10 * 60 * 1000)],
+        ]);
         setTempEmail(email);
         setTempOTP(result.otp);
-        
-        // In dev mode, show the OTP for testing
-        if (__DEV__) {
-          Alert.alert('Dev Mode', `Your 4-digit code is: ${result.otp}`);
-        }
-        
         return true;
       }
-      
       throw new Error(result.error || 'Failed to send OTP');
-    } catch (error: any) {
-      console.error('Error sending OTP:', error);
+    } catch (e) {
+      console.error('sendOTP error:', e);
       Alert.alert('Error', 'Failed to send verification code. Please try again.');
       return false;
     }
   };
 
-  // Verify 4-digit OTP code
   const verifyOTP = async (code: string): Promise<boolean> => {
     try {
       if (!tempEmail) {
         Alert.alert('Error', 'No email address found');
         return false;
       }
+      const [storedOTP, storedEmail, storedExpires] = await AsyncStorage.multiGet([
+        'temp_otp',
+        'temp_otp_email',
+        'temp_otp_expires',
+      ]).then((pairs) => pairs.map(([, v]) => v));
 
-      // Get stored OTP data
-      const storedOTP = await AsyncStorage.getItem('temp_otp');
-      const storedEmail = await AsyncStorage.getItem('temp_otp_email');
-      const storedExpires = await AsyncStorage.getItem('temp_otp_expires');
-      
-      // Check if OTP expired
-      if (storedExpires && Date.now() > parseInt(storedExpires)) {
+      if (storedExpires && Date.now() > parseInt(storedExpires, 10)) {
         await AsyncStorage.multiRemove(['temp_otp', 'temp_otp_email', 'temp_otp_expires']);
         Alert.alert('Error', 'Verification code has expired. Please request a new one.');
         return false;
       }
-      
-      // Verify OTP
       if (storedEmail !== tempEmail || storedOTP !== code) {
         Alert.alert('Error', 'Invalid verification code');
         return false;
       }
-      
-      // Clean up temp storage
+
       await AsyncStorage.multiRemove(['temp_otp', 'temp_otp_email', 'temp_otp_expires']);
 
-      // OTP is valid - create user session
       const userData: User = {
         id: `email_${Date.now()}`,
         email: tempEmail,
@@ -179,26 +161,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         dreamUsage: {
           used: 0,
           total: 0,
-          resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-          planId: 'free'
-        }
+          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          planId: 'free',
+        },
       };
-      
+
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setUser(userData);
       setTempEmail(null);
       setTempOTP(null);
-      
-      Alert.alert('Success!', 'Signed in successfully');
+
       return true;
-    } catch (error) {
-      console.error('Error verifying OTP:', error);
+    } catch (e) {
+      console.error('verifyOTP error:', e);
       Alert.alert('Error', 'Verification failed. Please try again.');
       return false;
     }
   };
 
-  // Resend OTP
   const resendOTP = async (): Promise<boolean> => {
     if (!tempEmail) return false;
     return sendOTP(tempEmail);
@@ -207,160 +188,178 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       setIsLoading(true);
-      
-      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response: any = await GoogleSignin.signIn();
-      
+
       const userData: User = {
-        id: response.user?.id || response.id || 'google_user',
-        email: response.user?.email || response.email,
-        name: response.user?.name || response.name || 'User',
-        photo: response.user?.photo || response.photo || null,
+        id: response?.user?.id || response?.id || `google_${Date.now()}`,
+        email: response?.user?.email || response?.email || '',
+        name: response?.user?.name || response?.name || 'User',
+        photo: response?.user?.photo || response?.photo || null,
         dreamUsage: {
           used: 0,
           total: 0,
-          resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-          planId: 'free'
-        }
+          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          planId: 'free',
+        },
       };
-      
+
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setUser(userData);
+
+      router.replace('/');
+    } catch (e: any) {
+      console.error('Google Sign-In Error:', e);
       
-      Alert.alert('Success!', `Welcome ${userData.name}!`);
-      router.replace('/(tabs)');
+      if (e?.code === 'USER_CANCELED' || e?.code === '-5' || e?.message?.includes('cancel')) {
+        console.log('User canceled Google Sign-In');
+        throw new Error('SIGN_IN_CANCELLED');
+      }
       
-    } catch (error: any) {
-      console.error('Google Sign-In Error:', error);
-      Alert.alert('Sign In Failed', error.message || 'Please try again');
+      Alert.alert('Sign In Failed', e?.message || 'Please try again');
+      throw e;
     } finally {
       setIsLoading(false);
     }
   };
 
-  // THIS IS THE FIXED APPLE SIGN-IN FUNCTION
   const signInWithApple = async () => {
     try {
       setIsLoading(true);
+
+      if (Platform.OS !== 'ios') {
+        Alert.alert('Not Available', 'Sign in with Apple is only available on iOS devices.');
+        throw new Error('PLATFORM_NOT_SUPPORTED');
+      }
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      // 🔥 FIXED: Smart name extraction for Apple Sign-In
+      let name = 'Apple User'; // Default fallback
       
-      if (Platform.OS === 'ios') {
-        // Actually perform Apple Sign-In (not just show "Coming Soon")
-        const credential = await AppleAuthentication.signInAsync({
-          requestedScopes: [
-            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-            AppleAuthentication.AppleAuthenticationScope.EMAIL,
-          ],
-        });
-
-        // Build the user name from Apple's response
-        let userName = 'User';
-        if (credential.fullName) {
-          const { givenName, familyName } = credential.fullName;
-          if (givenName || familyName) {
-            userName = [givenName, familyName].filter(Boolean).join(' ');
-          }
+      // Try to get full name from Apple
+      if (credential.fullName) {
+        const { givenName, familyName } = credential.fullName;
+        const built = [givenName, familyName].filter(Boolean).join(' ').trim();
+        if (built) {
+          name = built;
         }
-        
-        // If no name from Apple and we have email, use email prefix
-        if (userName === 'User' && credential.email) {
-          userName = credential.email.split('@')[0];
-        }
-
-        // Create user object with Apple data
-        const userData: User = {
-          id: credential.user, // Apple's unique user ID
-          email: credential.email || `${credential.user}@privaterelay.appleid.com`,
-          name: userName,
-          photo: null,
-          dreamUsage: {
-            used: 0,
-            total: 0,
-            resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-            planId: 'free'
-          }
-        };
-        
-        // Save user to AsyncStorage
-        await AsyncStorage.setItem('user', JSON.stringify(userData));
-        setUser(userData);
-        
-        Alert.alert('Success!', `Welcome ${userData.name}!`);
-        router.replace('/(tabs)');
-        
-      } else {
-        Alert.alert(
-          'Not Available',
-          'Apple Sign In is only available on iOS devices.'
-        );
       }
       
-    } catch (error: any) {
-      if (error.code === 'ERR_CANCELED') {
+      // 🔥 NEW: Only use email prefix if it's a REAL name, not an ugly Apple ID
+      if (name === 'Apple User' && credential.email) {
+        const emailPrefix = credential.email.split('@')[0];
+        
+        // Check if email prefix looks like an Apple ID (ugly)
+        const looksLikeAppleID = (
+          credential.email.includes('privaterelay.appleid.com') ||
+          emailPrefix.length > 30 ||
+          emailPrefix.includes('.') ||
+          /^\d{6}/.test(emailPrefix) || // Starts with 6+ digits
+          emailPrefix.includes('eba') ||
+          emailPrefix.includes('403')
+        );
+        
+        // Only use email prefix if it looks like a real name
+        if (!looksLikeAppleID) {
+          name = emailPrefix;
+        }
+        // Otherwise keep "Apple User" as clean fallback
+      }
+
+      const userData: User = {
+        id: credential.user,
+        email: credential.email || `${credential.user}@privaterelay.appleid.com`,
+        name, // 🔥 Clean name - either real name or "Apple User"
+        photo: null,
+        dreamUsage: {
+          used: 0,
+          total: 0,
+          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          planId: 'free',
+        },
+      };
+
+      await AsyncStorage.setItem('user', JSON.stringify(userData));
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+      setUser(userData);
+
+      router.replace('/');
+    } catch (e: any) {
+      if (e?.code === 'ERR_CANCELED' || e?.code === 'ERR_REQUEST_CANCELED') {
         console.log('User canceled Apple Sign-In');
+        throw new Error('SIGN_IN_CANCELLED');
       } else {
-        console.error('Apple Sign-In Error:', error);
-        Alert.alert('Sign In Failed', 'Please try Google Sign In instead');
+        console.error('Apple Sign-In Error:', e);
+        Alert.alert('Sign In Failed', 'Please try Google Sign-In instead');
+        throw e;
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const signInWithEmail = async (email: string, password: string) => {
+  const signInWithEmail = async (email: string, _password: string) => {
     try {
       setIsLoading(true);
-      
+
       const userData: User = {
         id: `local_${Date.now()}`,
-        email: email,
+        email,
         name: email.split('@')[0],
         photo: null,
         dreamUsage: {
           used: 0,
           total: 0,
-          resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-          planId: 'free'
-        }
+          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          planId: 'free',
+        },
       };
-      
+
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setUser(userData);
-      
-      Alert.alert('Success!', 'Signed in successfully');
-      router.replace('/(tabs)');
-      
-    } catch (error) {
+
+      router.replace('/');
+    } catch (e) {
       Alert.alert('Error', 'Sign in failed');
+      throw e;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const signUpWithEmail = async (email: string, password: string, name: string) => {
+  const signUpWithEmail = async (email: string, _password: string, name: string) => {
     try {
       setIsLoading(true);
-      
+
       const userData: User = {
         id: `local_${Date.now()}`,
-        email: email,
-        name: name,
+        email,
+        name,
         photo: null,
         dreamUsage: {
           used: 0,
           total: 0,
-          resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-          planId: 'free'
-        }
+          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          planId: 'free',
+        },
       };
-      
+
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
       setUser(userData);
-      
-      Alert.alert('Success!', 'Account created successfully');
-      router.replace('/(tabs)');
-      
-    } catch (error) {
+
+      router.replace('/');
+    } catch (e) {
       Alert.alert('Error', 'Sign up failed');
+      throw e;
     } finally {
       setIsLoading(false);
     }
@@ -369,72 +368,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       setIsLoading(true);
-      
       try {
         await GoogleSignin.signOut();
-      } catch (error) {
-        console.log('Google sign out skipped');
-      }
-      
+      } catch {}
       await AsyncStorage.removeItem('user');
+      await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       setUser(null);
-      
-      // Navigate to welcome instead of signin
-      router.replace('/(auth)/welcome');
-      
-    } catch (error) {
-      console.error('Sign out error:', error);
+      router.replace('/welcome');
+    } catch (e) {
+      console.error('Sign out error:', e);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Dream tracking methods
+  const canGenerateDream = (): boolean =>
+    !!user?.dreamUsage && user.dreamUsage.used < user.dreamUsage.total;
+
   const useDream = async (): Promise<boolean> => {
-    if (!user?.dreamUsage || !canGenerateDream()) {
-      return false;
-    }
-    
-    const updatedUser = {
+    if (!user?.dreamUsage || !canGenerateDream()) return false;
+    const updated: User = {
       ...user,
-      dreamUsage: {
-        ...user.dreamUsage,
-        used: user.dreamUsage.used + 1
-      }
+      dreamUsage: { ...user.dreamUsage, used: user.dreamUsage.used + 1 },
     };
-    
-    setUser(updatedUser);
-    await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-    
-    console.log(`Dream used: ${updatedUser.dreamUsage.used}/${updatedUser.dreamUsage.total}`);
+    setUser(updated);
+    await AsyncStorage.setItem('user', JSON.stringify(updated));
     return true;
   };
-  
-  const canGenerateDream = (): boolean => {
-    if (!user?.dreamUsage) return false;
-    return user.dreamUsage.used < user.dreamUsage.total;
-  };
-  
-  const getDreamsRemaining = (): number => {
-    if (!user?.dreamUsage) return 0;
-    return Math.max(0, user.dreamUsage.total - user.dreamUsage.used);
-  };
-  
-  const updateSubscription = async (planId: string, dreamsPerMonth: number) => {
+
+  const getDreamsRemaining = (): number =>
+    user?.dreamUsage ? Math.max(0, user.dreamUsage.total - user.dreamUsage.used) : 0;
+
+  const updateSubscription = async (subscriptionInfo: SubscriptionInfo) => {
     if (!user) return;
     
-    const updatedUser = {
+    let planId: PlanId = 'free';
+    if (subscriptionInfo.plan.includes('basic') || subscriptionInfo.plan === '$rc_monthly') {
+      planId = 'basic';
+    } else if (subscriptionInfo.plan.includes('pro') || subscriptionInfo.plan === 'Monthly') {
+      planId = 'pro';
+    } else if (subscriptionInfo.plan.includes('annual') || subscriptionInfo.plan === '$rc_annual') {
+      planId = 'annual';
+    }
+    
+    const updated: User = {
       ...user,
       dreamUsage: {
         used: 0,
-        total: dreamsPerMonth,
-        resetDate: Date.now() + (30 * 24 * 60 * 60 * 1000),
-        planId: planId as 'free' | 'basic' | 'pro' | 'annual'
-      }
+        total: subscriptionInfo.totalDreams,
+        resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        planId,
+      },
+    };
+    setUser(updated);
+    await AsyncStorage.setItem('user', JSON.stringify(updated));
+  };
+
+  const updateUserName = async (newName: string) => {
+    if (!user) return;
+    
+    const updated: User = {
+      ...user,
+      name: newName,
     };
     
-    setUser(updatedUser);
-    await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+    setUser(updated);
+    await AsyncStorage.setItem('user', JSON.stringify(updated));
   };
 
   return (
@@ -444,7 +443,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         tempEmail,
         signInWithGoogle,
-        signInWithApple: Platform.OS === 'ios' ? signInWithApple : undefined,
+        signInWithApple,
         signInWithEmail,
         signUpWithEmail,
         signOut,
@@ -454,7 +453,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         useDream,
         canGenerateDream,
         getDreamsRemaining,
-        updateSubscription
+        updateSubscription,
+        updateUserName,
       }}
     >
       {children}
@@ -463,11 +463,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 };
 
 export default function AuthContextProvider({ children }: { children: React.ReactNode }) {

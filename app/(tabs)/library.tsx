@@ -1,4 +1,4 @@
-// app/(tabs)/library.tsx - FIXED DURATION DISPLAY
+// app/(tabs)/library.tsx - FIXED: Empty state moved higher
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { ResizeMode, Video } from 'expo-av';
@@ -591,19 +591,16 @@ export default function LibraryScreen() {
 
   return (
     <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
-      {/* FIX: Status Bar Configuration for Android */}
       <StatusBar 
         translucent={Platform.OS === 'android'}
         backgroundColor="transparent"
         barStyle="light-content"
       />
       
-      {/* FIX: Custom SafeAreaView handling for Android */}
       <View style={{ 
         flex: 1,
         paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : insets.top,
       }}>
-        {/* ORIGINAL TITLE DESIGN */}
         <Text style={styles.title}>Your Dreams</Text>
         
         <FlatList
@@ -629,14 +626,13 @@ export default function LibraryScreen() {
           }
           contentContainerStyle={{
             padding: 16,
-            paddingBottom: Platform.OS === 'android' ? 100 : 28, // More padding for Android tab bar
+            paddingBottom: Platform.OS === 'android' ? 100 : 28,
             flexGrow: 1,
           }}
           renderItem={renderDreamItem}
           showsVerticalScrollIndicator={false}
         />
 
-        {/* Professional Video Player Modal */}
         <VideoPlayerModal
           visible={playerVisible}
           dream={selectedDream}
@@ -1061,7 +1057,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 80,
+    paddingTop: 40, // 🔥 CHANGED FROM 80 to 40 - MOVES IT HIGHER!
   },
   
   emptyText: {

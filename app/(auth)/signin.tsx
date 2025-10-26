@@ -1,7 +1,6 @@
-// app/(auth)/signin.tsx - SIGN IN WITH APPLE + GOOGLE AUTH
+// app/(auth)/signin.tsx - X BUTTON POPS BACK WITHOUT REMOUNTING
 import { Inter_400Regular, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
 import { Ionicons } from '@expo/vector-icons';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import { router } from 'expo-router';
 import React from 'react';
 import {
@@ -16,8 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SignInScreen() {
-  const { signInWithGoogle, isLoading } = useAuth();
-  
+  const { signInWithGoogle, signInWithApple, isLoading } = useAuth();
+
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_600SemiBold,
@@ -30,67 +29,50 @@ export default function SignInScreen() {
 
   const handleAppleSignIn = async () => {
     try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      
-      // Handle the Apple credential
-      console.log('Apple Sign-In Success:', {
-        user: credential.user,
-        email: credential.email,
-        fullName: credential.fullName,
-        identityToken: credential.identityToken,
-        authorizationCode: credential.authorizationCode,
-      });
-      
-      // TODO: Send credential to your backend or save to your auth context
-      // For now, navigate to home
-      router.replace('/(tabs)/home');
-      
+      await signInWithApple();
     } catch (e: any) {
-      if (e.code === 'ERR_CANCELED') {
-        console.log('User canceled Apple Sign-In');
-      } else {
-        console.error('Apple Sign-In failed:', e);
-      }
+      console.error('Apple Sign-In failed:', e);
     }
   };
 
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
-      // Navigation will be handled by auth state change in _layout.tsx
-    } catch (error) {
+    } catch (error: any) {
       console.error('Google sign-in failed:', error);
     }
   };
 
   const handleEmailSignIn = () => {
-    router.push('/(auth)/email-entry');
+    router.push('/email-entry');
   };
 
+  // ✅ Close button: pop if possible (no remount), otherwise hard-navigate
   const handleClose = () => {
-    router.back();
+    if (router.canGoBack()) {
+      router.back(); // pops to existing /welcome instance without remount
+    } else {
+      router.replace('/welcome'); // fallback for deep links / cold starts
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with title and close button */}
+      {/* Header with X button */}
       <View style={styles.header}>
         <Text style={styles.title}>Sign In</Text>
-        <TouchableOpacity 
-          style={styles.closeButton}
+        <TouchableOpacity
           onPress={handleClose}
+          style={styles.closeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button"
+          accessibilityLabel="Close and go back"
         >
-          <Ionicons name="close" size={28} color="#999" />
+          <Ionicons name="close" size={28} color="#000" />
         </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
-        {/* Sign in buttons */}
         <View style={styles.buttonContainer}>
           {/* Apple Sign In - Only show on iOS */}
           {Platform.OS === 'ios' && (
@@ -105,14 +87,14 @@ export default function SignInScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Google Sign In - Shows on both platforms */}
+          {/* Google Sign In */}
           <TouchableOpacity
             style={[styles.googleButton, isLoading && styles.buttonDisabled]}
             onPress={handleGoogleSignIn}
             activeOpacity={0.8}
             disabled={isLoading}
           >
-            <Image 
+            <Image
               source={require('../../assets/images/google-logo.png')}
               style={styles.googleLogo}
               resizeMode="contain"
@@ -122,7 +104,7 @@ export default function SignInScreen() {
             </Text>
           </TouchableOpacity>
 
-          {/* Email Sign In - Shows on both platforms */}
+          {/* Email Sign In */}
           <TouchableOpacity
             style={[styles.emailButton, isLoading && styles.buttonDisabled]}
             onPress={handleEmailSignIn}
@@ -168,7 +150,11 @@ const styles = StyleSheet.create({
   closeButton: {
     position: 'absolute',
     right: 24,
-    padding: 4,
+    top: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,
@@ -179,7 +165,6 @@ const styles = StyleSheet.create({
   buttonContainer: {
     marginBottom: 40,
   },
-  // Apple button - black
   appleButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -196,7 +181,6 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     letterSpacing: -0.3,
   },
-  // Google button - white with border
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -219,7 +203,6 @@ const styles = StyleSheet.create({
     color: '#000',
     letterSpacing: -0.3,
   },
-  // Email button - white with border
   emailButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -240,7 +223,6 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
-  // Terms
   terms: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
