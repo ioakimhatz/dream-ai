@@ -1,4 +1,4 @@
-// app/utils/sceneImageGenerator.ts - FINAL VERSION
+// app/utils/sceneImageGenerator.ts - WITH CORRECT ENDPOINTS + SCENE CHAINING
 import { uploadImageToCloudinary } from "./cloudinaryUpload";
 
 const FAL_KEY = 
@@ -7,64 +7,163 @@ const FAL_KEY =
   process.env.EXPO_PUBLIC_FAL_API_KEY;
 
 /**
- * Generate a scene image with one or more faces
- * @param faceImageUris - Single URI or array of local face image URIs (supports 1-3 faces)
- * @param actPrompt - Scene description prompt
- * @returns URL of generated scene image
+ * Generate a scene image with optional face images in 9:16 aspect ratio
+ * 🔥 Smart endpoint selection:
+ * - NO faces + NO base: fal-ai/nano-banana (text-to-image)
+ * - WITH faces OR base: fal-ai/nano-banana/edit (image editing)
  */
 export async function generateSceneImage(
-  faceImageUris: string | string[],
-  actPrompt: string
+  faceImageUris: string | string[] | undefined,
+  actPrompt: string,
+  baseImageUrl?: string
 ): Promise<string> {
-  console.log("🎨 Nano Banana:", actPrompt);
+  const nanoBananaPrompt = actPrompt.replace(
+    "photorealistic video footage of",
+    "photorealistic photo of"
+  );
+  
+  console.log("🎨 [Nano Banana] Using prompt:", nanoBananaPrompt);
+  
+  if (baseImageUrl) {
+    console.log("🔗 [Scene Chaining] Using base image for consistency:", baseImageUrl);
+  }
 
   try {
-    // Convert single URI to array for consistent handling
-    const urisArray = Array.isArray(faceImageUris) ? faceImageUris : [faceImageUris];
+    // Handle face images (optional)
+    let faceUrls: string[] = [];
     
-    // Upload all faces to Cloudinary in parallel
-    console.log(`📤 Uploading ${urisArray.length} face(s) to Cloudinary...`);
-    const uploadPromises = urisArray.map(uri => uploadImageToCloudinary(uri));
-    const faceUrls = await Promise.all(uploadPromises);
-    
-    console.log(`✅ Uploaded ${faceUrls.length} face URL(s):`, faceUrls);
+    if (faceImageUris) {
+      const urisArray = Array.isArray(faceImageUris) ? faceImageUris : [faceImageUris];
+      
+      // Check if these are local URIs that need upload
+      const needsUpload = urisArray.some(uri => uri.startsWith('file://'));
+      
+      if (needsUpload) {
+        console.log(`📤 Uploading ${urisArray.length} face(s) to Cloudinary...`);
+        const uploadPromises = urisArray.map(uri => uploadImageToCloudinary(uri));
+        faceUrls = await Promise.all(uploadPromises);
+        console.log(`✅ Uploaded ${faceUrls.length} face URL(s)`);
+      } else {
+        faceUrls = urisArray;
+        console.log(`✅ Using ${faceUrls.length} pre-uploaded face URL(s)`);
+      }
+    } else {
+      console.log(`ℹ️ No face images provided - generating from prompt only`);
+    }
 
     if (!FAL_KEY) {
       throw new Error("No FAL API key configured");
     }
 
-    // NanoBanana API call with multiple faces
-    const response = await fetch("https://fal.run/fal-ai/nano-banana/edit", {
-      method: "POST",
-      headers: {
-        "Authorization": `Key ${FAL_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt: actPrompt,
-        image_urls: faceUrls,
+    // 🔥 SMART ENDPOINT SELECTION
+    const hasImages = faceUrls.length > 0 || baseImageUrl;
+    
+    if (!hasImages) {
+      // ✅ NO IMAGES: Use text-to-image endpoint
+      console.log("🎨 Using Nano Banana text-to-image (no images)");
+      
+      const response = await fetch("https://fal.run/fal-ai/nano-banana", {
+        method: "POST",
+        headers: {
+          "Authorization": `Key ${FAL_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: nanoBananaPrompt,
+          num_images: 1,
+          output_format: "jpeg",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ Nano Banana Text-to-Image Error:", response.status, errorText);
+        
+        const errorLower = errorText.toLowerCase();
+        if (
+          response.status === 400 || 
+          response.status === 403 || 
+          errorLower.includes("content") ||
+          errorLower.includes("policy") ||
+          errorLower.includes("inappropriate")
+        ) {
+          console.error("🚫 Content rejected by NanoBanana");
+          throw new Error("CONTENT_REJECTED_BY_API");
+        }
+        
+        throw new Error(`Nano Banana error: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.images?.[0]?.url) {
+        throw new Error("No image URL in Nano Banana response");
+      }
+
+      console.log("✅ Scene generated (text-to-image, 0 characters)");
+      return result.images[0].url;
+    } else {
+      // ✅ WITH IMAGES: Use edit endpoint
+      console.log("👥 Using Nano Banana edit (with images)");
+      
+      const body: any = {
+        prompt: nanoBananaPrompt,
+        image_urls: baseImageUrl ? [baseImageUrl, ...faceUrls] : faceUrls,
         num_images: 1,
         output_format: "jpeg",
-      }),
-    });
+        aspect_ratio: "9:16",
+        negative_prompt: "cartoon, anime, drawing, painting, sketch, fantasy art, illustration, comic book, 3d render, cgi, artistic, stylized, animated, unrealistic",
+      };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("API Error:", response.status, errorText);
-      throw new Error(`Nano Banana API error: ${response.status} - ${errorText}`);
+      console.log("🔗 Total images:", body.image_urls.length);
+
+      const response = await fetch("https://fal.run/fal-ai/nano-banana/edit", {
+        method: "POST",
+        headers: {
+          "Authorization": `Key ${FAL_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ Nano Banana Edit Error:", response.status, errorText);
+        
+        const errorLower = errorText.toLowerCase();
+        if (
+          response.status === 400 || 
+          response.status === 403 || 
+          errorLower.includes("content") ||
+          errorLower.includes("policy") ||
+          errorLower.includes("inappropriate")
+        ) {
+          console.error("🚫 Content rejected by NanoBanana");
+          throw new Error("CONTENT_REJECTED_BY_API");
+        }
+        
+        throw new Error(`Nano Banana edit error: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.images?.[0]?.url) {
+        throw new Error("No image URL in Nano Banana response");
+      }
+
+      console.log(`✅ Scene generated (edit, ${faceUrls.length} character(s))`);
+      return result.images[0].url;
     }
-
-    const result = await response.json();
-    console.log("📦 Result:", result);
-
-    if (!result.images?.[0]?.url) {
-      throw new Error("No image URL in response");
-    }
-
-    console.log("✅ Scene generated with", faceUrls.length, "character(s)");
-    return result.images[0].url;
+    
   } catch (err: any) {
-    console.error("❌ Full error:", err);
-    throw new Error(`Scene failed: ${err.message}`);
+    console.error("❌ generateSceneImage failed:", err);
+    
+    if (err.message === "CONTENT_REJECTED_BY_API") {
+      throw err;
+    }
+    
+    throw new Error(`Scene generation failed: ${err.message}`);
   }
 }
+
+export default { generateSceneImage };

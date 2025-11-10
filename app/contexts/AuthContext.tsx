@@ -1,4 +1,4 @@
-// app/contexts/AuthContext.tsx - FIXED: Smart Apple name + Re-throws errors
+// app/contexts/AuthContext.tsx - FIXED: Removed duplicate subscription tracking
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -7,27 +7,25 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import { EmailService } from '../../lib/emailjs-service';
 
-export type PlanId = 'free' | 'basic' | 'pro' | 'annual';
+// 🔥 Firebase imports
+import { 
+  signInWithCredential, 
+  GoogleAuthProvider,
+  OAuthProvider,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  onAuthStateChanged,
+  updateProfile
+} from 'firebase/auth';
+import { auth } from '../config/firebaseConfig';
 
-export interface SubscriptionInfo {
-  plan: string;
-  isActive: boolean;
-  renewalDate?: Date;
-  dreamsRemaining: number;
-  totalDreams: number;
-}
-
+// 🔥 REMOVED: dreamUsage from User interface - handled by DreamUsageContext
 export interface User {
-  id: string;
+  id: string; // Firebase UID (stable across devices)
   email: string;
   name: string;
   photo?: string | null;
-  dreamUsage?: {
-    used: number;
-    total: number;
-    resetDate: number;
-    planId: PlanId;
-  };
 }
 
 interface AuthContextType {
@@ -45,10 +43,6 @@ interface AuthContextType {
   verifyOTP: (code: string) => Promise<boolean>;
   resendOTP: () => Promise<boolean>;
 
-  useDream: () => Promise<boolean>;
-  canGenerateDream: () => boolean;
-  getDreamsRemaining: () => number;
-  updateSubscription: (subscriptionInfo: SubscriptionInfo) => Promise<void>;
   updateUserName: (newName: string) => Promise<void>;
 }
 
@@ -60,53 +54,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [tempEmail, setTempEmail] = useState<string | null>(null);
   const [tempOTP, setTempOTP] = useState<string | null>(null);
 
+  // 🔥 Listen to Firebase Auth state changes
   useEffect(() => {
-    (async () => {
+    console.log('🔥 Setting up Firebase auth listener...');
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
-        const saved = await AsyncStorage.getItem('user');
-        if (saved) {
-          const parsed: User = JSON.parse(saved);
-          if (!parsed.dreamUsage) {
-            parsed.dreamUsage = {
-              used: 0,
-              total: 0,
-              resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-              planId: 'free',
-            };
-          }
-          setUser(parsed);
+        if (firebaseUser) {
+          console.log('✅ Firebase user detected:', firebaseUser.uid);
+          
+          // Create user object WITHOUT dreamUsage (handled by DreamUsageContext)
+          const userData: User = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            photo: firebaseUser.photoURL,
+          };
+
+          await AsyncStorage.setItem('user', JSON.stringify(userData));
+          setUser(userData);
+          console.log('✅ User saved to AsyncStorage:', userData.id);
+        } else {
+          console.log('❌ No Firebase user, clearing state');
+          setUser(null);
         }
       } catch (e) {
-        console.error('Auth rehydrate error:', e);
+        console.error('❌ Auth state change error:', e);
       } finally {
         setIsLoading(false);
       }
-    })();
+    });
+
+    return () => {
+      console.log('🔥 Cleaning up Firebase auth listener');
+      unsubscribe();
+    };
   }, []);
-
-  useEffect(() => {
-    if (user?.dreamUsage) checkMonthlyReset();
-  }, [user?.dreamUsage?.resetDate]);
-
-  const checkMonthlyReset = async () => {
-    if (!user?.dreamUsage) return;
-    const now = Date.now();
-    if (now > user.dreamUsage.resetDate) {
-      const updated: User = {
-        ...user,
-        dreamUsage: {
-          ...user.dreamUsage,
-          used: 0,
-          resetDate: now + 30 * 24 * 60 * 60 * 1000,
-        },
-      };
-      setUser(updated);
-      await AsyncStorage.setItem('user', JSON.stringify(updated));
-      if (user.dreamUsage.total > 0) {
-        Alert.alert('Dreams Refreshed!', `Your ${user.dreamUsage.total} monthly dreams have been reset.`);
-      }
-    }
-  };
 
   const sendOTP = async (email: string): Promise<boolean> => {
     try {
@@ -135,6 +117,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         Alert.alert('Error', 'No email address found');
         return false;
       }
+
+      // Verify OTP locally
       const [storedOTP, storedEmail, storedExpires] = await AsyncStorage.multiGet([
         'temp_otp',
         'temp_otp_email',
@@ -146,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         Alert.alert('Error', 'Verification code has expired. Please request a new one.');
         return false;
       }
+
       if (storedEmail !== tempEmail || storedOTP !== code) {
         Alert.alert('Error', 'Invalid verification code');
         return false;
@@ -153,26 +138,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       await AsyncStorage.multiRemove(['temp_otp', 'temp_otp_email', 'temp_otp_expires']);
 
-      const userData: User = {
-        id: `email_${Date.now()}`,
-        email: tempEmail,
-        name: tempEmail.split('@')[0],
-        photo: null,
-        dreamUsage: {
-          used: 0,
-          total: 0,
-          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          planId: 'free',
-        },
-      };
+      // 🔥 Use stored password or create new one for this email
+      const passwordKey = `firebase_pwd_${tempEmail}`;
+      let storedPassword = await AsyncStorage.getItem(passwordKey);
+      
+      if (!storedPassword) {
+        storedPassword = Math.random().toString(36).slice(-16) + Math.random().toString(36).slice(-16);
+        await AsyncStorage.setItem(passwordKey, storedPassword);
+      }
 
-      await AsyncStorage.setItem('user', JSON.stringify(userData));
-      await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-      setUser(userData);
-      setTempEmail(null);
-      setTempOTP(null);
+      try {
+        // Try to sign in first
+        const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, storedPassword);
+        console.log('✅ Signed in existing user:', signInCredential.user.uid);
 
-      return true;
+        await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+        setTempEmail(null);
+        setTempOTP(null);
+
+        return true;
+      } catch (signInError: any) {
+        // If sign in fails, create new user
+        if (signInError.code === 'auth/user-not-found' || 
+            signInError.code === 'auth/wrong-password' || 
+            signInError.code === 'auth/invalid-credential') {
+          try {
+            const userCredential = await createUserWithEmailAndPassword(auth, tempEmail, storedPassword);
+            console.log('✅ Created new user:', userCredential.user.uid);
+            
+            await updateProfile(userCredential.user, {
+              displayName: tempEmail.split('@')[0]
+            });
+
+            await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+            setTempEmail(null);
+            setTempOTP(null);
+
+            return true;
+          } catch (createError: any) {
+            console.error('Create user error:', createError);
+            if (createError.code === 'auth/email-already-in-use') {
+              Alert.alert('Account Exists', 'An account with this email already exists. Please use a different sign-in method.');
+              return false;
+            }
+            throw createError;
+          }
+        }
+        throw signInError;
+      }
     } catch (e) {
       console.error('verifyOTP error:', e);
       Alert.alert('Error', 'Verification failed. Please try again.');
@@ -191,23 +204,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response: any = await GoogleSignin.signIn();
 
-      const userData: User = {
-        id: response?.user?.id || response?.id || `google_${Date.now()}`,
-        email: response?.user?.email || response?.email || '',
-        name: response?.user?.name || response?.name || 'User',
-        photo: response?.user?.photo || response?.photo || null,
-        dreamUsage: {
-          used: 0,
-          total: 0,
-          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          planId: 'free',
-        },
-      };
+      const { idToken } = await GoogleSignin.getTokens();
+      const googleCredential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, googleCredential);
 
-      await AsyncStorage.setItem('user', JSON.stringify(userData));
+      console.log('✅ Google sign-in successful:', userCredential.user.uid);
+
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-      setUser(userData);
-
       router.replace('/');
     } catch (e: any) {
       console.error('Google Sign-In Error:', e);
@@ -240,56 +243,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ],
       });
 
-      // 🔥 FIXED: Smart name extraction for Apple Sign-In
-      let name = 'Apple User'; // Default fallback
+      const appleCredential = new OAuthProvider('apple.com').credential({
+        idToken: credential.identityToken!,
+        rawNonce: undefined,
+      });
+      const userCredential = await signInWithCredential(auth, appleCredential);
+
+      console.log('✅ Apple sign-in successful:', userCredential.user.uid);
+
+      // Smart name extraction
+      let name = 'Apple User';
       
-      // Try to get full name from Apple
       if (credential.fullName) {
         const { givenName, familyName } = credential.fullName;
         const built = [givenName, familyName].filter(Boolean).join(' ').trim();
-        if (built) {
-          name = built;
-        }
+        if (built) name = built;
       }
       
-      // 🔥 NEW: Only use email prefix if it's a REAL name, not an ugly Apple ID
       if (name === 'Apple User' && credential.email) {
         const emailPrefix = credential.email.split('@')[0];
-        
-        // Check if email prefix looks like an Apple ID (ugly)
         const looksLikeAppleID = (
           credential.email.includes('privaterelay.appleid.com') ||
           emailPrefix.length > 30 ||
           emailPrefix.includes('.') ||
-          /^\d{6}/.test(emailPrefix) || // Starts with 6+ digits
+          /^\d{6}/.test(emailPrefix) ||
           emailPrefix.includes('eba') ||
           emailPrefix.includes('403')
         );
         
-        // Only use email prefix if it looks like a real name
-        if (!looksLikeAppleID) {
-          name = emailPrefix;
-        }
-        // Otherwise keep "Apple User" as clean fallback
+        if (!looksLikeAppleID) name = emailPrefix;
       }
 
-      const userData: User = {
-        id: credential.user,
-        email: credential.email || `${credential.user}@privaterelay.appleid.com`,
-        name, // 🔥 Clean name - either real name or "Apple User"
-        photo: null,
-        dreamUsage: {
-          used: 0,
-          total: 0,
-          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          planId: 'free',
-        },
-      };
+      if (name !== 'Apple User' && !userCredential.user.displayName) {
+        await updateProfile(userCredential.user, { displayName: name });
+      }
 
-      await AsyncStorage.setItem('user', JSON.stringify(userData));
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-      setUser(userData);
-
       router.replace('/');
     } catch (e: any) {
       if (e?.code === 'ERR_CANCELED' || e?.code === 'ERR_REQUEST_CANCELED') {
@@ -309,17 +298,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setIsLoading(true);
 
+      // Create local user (fallback - not recommended for production)
       const userData: User = {
         id: `local_${Date.now()}`,
         email,
         name: email.split('@')[0],
         photo: null,
-        dreamUsage: {
-          used: 0,
-          total: 0,
-          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          planId: 'free',
-        },
       };
 
       await AsyncStorage.setItem('user', JSON.stringify(userData));
@@ -344,12 +328,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email,
         name,
         photo: null,
-        dreamUsage: {
-          used: 0,
-          total: 0,
-          resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          planId: 'free',
-        },
       };
 
       await AsyncStorage.setItem('user', JSON.stringify(userData));
@@ -368,12 +346,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       setIsLoading(true);
+      console.log('🔥 Signing out user:', user?.id);
+      
+      // Sign out from Google
       try {
         await GoogleSignin.signOut();
+        console.log('✅ Signed out from Google');
       } catch {}
+      
+      // Sign out from Firebase
+      await firebaseSignOut(auth);
+      console.log('✅ Signed out from Firebase');
+      
+      // Clear user data
       await AsyncStorage.removeItem('user');
+      console.log('✅ Cleared user from AsyncStorage');
+      
       await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       setUser(null);
+      
       router.replace('/welcome');
     } catch (e) {
       console.error('Sign out error:', e);
@@ -382,50 +373,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const canGenerateDream = (): boolean =>
-    !!user?.dreamUsage && user.dreamUsage.used < user.dreamUsage.total;
-
-  const useDream = async (): Promise<boolean> => {
-    if (!user?.dreamUsage || !canGenerateDream()) return false;
-    const updated: User = {
-      ...user,
-      dreamUsage: { ...user.dreamUsage, used: user.dreamUsage.used + 1 },
-    };
-    setUser(updated);
-    await AsyncStorage.setItem('user', JSON.stringify(updated));
-    return true;
-  };
-
-  const getDreamsRemaining = (): number =>
-    user?.dreamUsage ? Math.max(0, user.dreamUsage.total - user.dreamUsage.used) : 0;
-
-  const updateSubscription = async (subscriptionInfo: SubscriptionInfo) => {
-    if (!user) return;
-    
-    let planId: PlanId = 'free';
-    if (subscriptionInfo.plan.includes('basic') || subscriptionInfo.plan === '$rc_monthly') {
-      planId = 'basic';
-    } else if (subscriptionInfo.plan.includes('pro') || subscriptionInfo.plan === 'Monthly') {
-      planId = 'pro';
-    } else if (subscriptionInfo.plan.includes('annual') || subscriptionInfo.plan === '$rc_annual') {
-      planId = 'annual';
-    }
-    
-    const updated: User = {
-      ...user,
-      dreamUsage: {
-        used: 0,
-        total: subscriptionInfo.totalDreams,
-        resetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
-        planId,
-      },
-    };
-    setUser(updated);
-    await AsyncStorage.setItem('user', JSON.stringify(updated));
-  };
-
   const updateUserName = async (newName: string) => {
     if (!user) return;
+    
+    // Update Firebase profile
+    if (auth.currentUser) {
+      await updateProfile(auth.currentUser, { displayName: newName });
+    }
     
     const updated: User = {
       ...user,
@@ -450,10 +404,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         sendOTP,
         verifyOTP,
         resendOTP,
-        useDream,
-        canGenerateDream,
-        getDreamsRemaining,
-        updateSubscription,
         updateUserName,
       }}
     >

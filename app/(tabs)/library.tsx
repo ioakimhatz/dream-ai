@@ -1,10 +1,11 @@
-// app/(tabs)/library.tsx - FIXED: Empty state moved higher
+// app/(tabs)/library.tsx - WITH AUTO-PLAY & LOOP
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -27,12 +28,31 @@ import { deleteDream, getDreams, type DreamItem } from '../utils/storage';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Professional Video Player Modal Component - NO EMOJIS
-function VideoPlayerModal({ 
-  visible, 
-  dream, 
-  onClose, 
-  onDreamDeleted 
+const downloadVideoLocally = async (url: string, id: string): Promise<string> => {
+  try {
+    const path = `${FileSystem.documentDirectory}dream_${id}.mp4`;
+    const info = await FileSystem.getInfoAsync(path);
+
+    if (info.exists) {
+      console.log('✅ Video already cached locally:', path);
+      return path;
+    }
+
+    console.log('📥 Downloading video from Cloudinary...');
+    const { uri } = await FileSystem.downloadAsync(url, path);
+    console.log('✅ Video downloaded to:', uri);
+    return uri;
+  } catch (error) {
+    console.error('❌ Download failed:', error);
+    throw error;
+  }
+};
+
+function VideoPlayerModal({
+  visible,
+  dream,
+  onClose,
+  onDreamDeleted
 }: {
   visible: boolean;
   dream: DreamItem | null;
@@ -46,25 +66,22 @@ function VideoPlayerModal({
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isBuffering, setIsBuffering] = useState(false);
-  
+
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const videoRef = useRef<Video>(null);
 
-  // Get video URLs - prioritize stitched video over clips
   const getVideoUrls = () => {
     if (!dream) return [];
-    
-    // If there's a single stitched video, use that
+
     if (dream.videoUrl && typeof dream.videoUrl === 'string') {
       return [dream.videoUrl];
     }
-    
-    // Otherwise use clips
+
     if (dream.clips && Array.isArray(dream.clips) && dream.clips.length > 0) {
       return dream.clips;
     }
-    
+
     return [];
   };
 
@@ -72,7 +89,6 @@ function VideoPlayerModal({
   const currentVideoUrl = videoUrls[currentIndex] || videoUrls[0];
   const hasMultipleVideos = videoUrls.length > 1;
 
-  // Auto-hide controls after 4 seconds
   useEffect(() => {
     if (showControls && visible && !isBuffering) {
       resetControlsTimer();
@@ -84,7 +100,6 @@ function VideoPlayerModal({
     };
   }, [showControls, visible, isBuffering]);
 
-  // Reset when modal opens
   useEffect(() => {
     if (visible) {
       setIsPlaying(true);
@@ -94,6 +109,12 @@ function VideoPlayerModal({
       fadeAnim.setValue(1);
     }
   }, [visible, fadeAnim]);
+
+  useEffect(() => {
+    if (visible && dream && currentVideoUrl?.includes('cloudinary.com')) {
+      downloadVideoLocally(currentVideoUrl, dream.id).catch(console.error);
+    }
+  }, [visible, dream, currentVideoUrl]);
 
   const resetControlsTimer = () => {
     if (controlsTimer.current) {
@@ -164,11 +185,20 @@ function VideoPlayerModal({
 
   const handleShare = async () => {
     if (!dream) return;
-    
+
     try {
       const videoToShare = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
-      
-      if (videoToShare.startsWith('file://')) {
+
+      if (videoToShare.includes('cloudinary.com')) {
+        Alert.alert('Preparing...', 'Downloading video to share');
+
+        const localUri = await downloadVideoLocally(videoToShare, dream.id);
+
+        await Sharing.shareAsync(localUri, {
+          dialogTitle: `Share Dream: ${createShortTitle(dream.prompt)}`,
+          mimeType: 'video/mp4',
+        });
+      } else if (videoToShare.startsWith('file://')) {
         await Sharing.shareAsync(videoToShare, {
           dialogTitle: `Share Dream: ${createShortTitle(dream.prompt)}`,
           mimeType: 'video/mp4',
@@ -193,9 +223,18 @@ function VideoPlayerModal({
         return;
       }
 
-      if (currentVideoUrl && currentVideoUrl.startsWith('file://')) {
-        const asset = await MediaLibrary.createAssetAsync(currentVideoUrl);
-        Alert.alert('Success', 'Video saved to your gallery!');
+      const videoToDownload = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
+
+      if (videoToDownload.includes('cloudinary.com')) {
+        Alert.alert('Downloading...', 'Please wait while we save your dream');
+
+        const localUri = await downloadVideoLocally(videoToDownload, dream!.id);
+
+        await MediaLibrary.createAssetAsync(localUri);
+        Alert.alert('Success! ✨', 'Video saved to your gallery!');
+      } else if (videoToDownload.startsWith('file://')) {
+        await MediaLibrary.createAssetAsync(videoToDownload);
+        Alert.alert('Success! ✨', 'Video saved to your gallery!');
       } else {
         Alert.alert('Info', 'Video download not available');
       }
@@ -235,9 +274,8 @@ function VideoPlayerModal({
       setPosition(status.positionMillis || 0);
       setDuration(status.durationMillis || 0);
       setIsBuffering(status.isBuffering || false);
-      
+
       if (status.didJustFinish && hasMultipleVideos && currentIndex < videoUrls.length - 1) {
-        // Auto-advance to next video
         setTimeout(() => {
           setCurrentIndex(currentIndex + 1);
           setPosition(0);
@@ -255,8 +293,8 @@ function VideoPlayerModal({
 
   const formatDate = (timestamp: number): string => {
     const date = new Date(timestamp);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric',
       year: 'numeric'
     });
@@ -264,7 +302,6 @@ function VideoPlayerModal({
 
   if (!dream || !visible) return null;
 
-  // If no video URLs, show processing placeholder
   if (videoUrls.length === 0) {
     return (
       <Modal
@@ -276,7 +313,7 @@ function VideoPlayerModal({
         <StatusBar hidden />
         <View style={modalStyles.container}>
           <View style={modalStyles.videoContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={modalStyles.videoPlaceholder}
               activeOpacity={1}
               onPress={handleVideoTap}
@@ -291,7 +328,6 @@ function VideoPlayerModal({
             </TouchableOpacity>
           </View>
 
-          {/* Simple close button for processing state */}
           <View style={modalStyles.processingCloseContainer}>
             <TouchableOpacity onPress={onClose} style={modalStyles.processingCloseButton}>
               <Ionicons name="close" size={24} color="#FFFFFF" />
@@ -311,9 +347,8 @@ function VideoPlayerModal({
     >
       <StatusBar hidden />
       <View style={modalStyles.container}>
-        {/* Video Player Container */}
         <View style={modalStyles.videoContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={modalStyles.videoTouchArea}
             activeOpacity={1}
             onPress={handleVideoTap}
@@ -323,12 +358,11 @@ function VideoPlayerModal({
               source={{ uri: currentVideoUrl }}
               style={modalStyles.video}
               resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={isPlaying}
-              isLooping={!hasMultipleVideos}
+              shouldPlay={true}  // 🔥 ALWAYS AUTO-PLAY
+              isLooping={true}   // 🔥 ALWAYS LOOP
               onPlaybackStatusUpdate={onPlaybackStatusUpdate}
             />
 
-            {/* Loading Indicator */}
             {isBuffering && (
               <View style={modalStyles.loadingOverlay}>
                 <View style={modalStyles.loadingSpinner} />
@@ -338,20 +372,16 @@ function VideoPlayerModal({
           </TouchableOpacity>
         </View>
 
-        {/* Professional Controls Overlay */}
         {showControls && (
           <Animated.View style={[modalStyles.controlsOverlay, { opacity: fadeAnim }]}>
-            {/* Top Controls Bar */}
             <LinearGradient
               colors={['rgba(0,0,0,0.8)', 'rgba(0,0,0,0.4)', 'transparent']}
               style={[modalStyles.topControls, { paddingTop: insets.top + 10 }]}
             >
-              {/* Close Button */}
               <TouchableOpacity onPress={onClose} style={modalStyles.controlButton}>
                 <Ionicons name="close" size={24} color="#FFFFFF" />
               </TouchableOpacity>
 
-              {/* Title */}
               <View style={modalStyles.titleContainer}>
                 <Text style={modalStyles.videoTitle} numberOfLines={1}>
                   {createShortTitle(dream.prompt)}
@@ -363,7 +393,6 @@ function VideoPlayerModal({
                 )}
               </View>
 
-              {/* Action Buttons */}
               <View style={modalStyles.topActions}>
                 <TouchableOpacity onPress={handleShare} style={modalStyles.controlButton}>
                   <Ionicons name="share-outline" size={22} color="#FFFFFF" />
@@ -377,7 +406,6 @@ function VideoPlayerModal({
               </View>
             </LinearGradient>
 
-            {/* Center Play Controls */}
             <View style={modalStyles.centerControls}>
               {hasMultipleVideos && currentIndex > 0 && (
                 <TouchableOpacity onPress={skipBackward} style={modalStyles.skipButton}>
@@ -386,10 +414,10 @@ function VideoPlayerModal({
               )}
 
               <TouchableOpacity onPress={togglePlayPause} style={modalStyles.playButton}>
-                <Ionicons 
-                  name={isPlaying ? "pause" : "play"} 
-                  size={36} 
-                  color="#000000" 
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={36}
+                  color="#000000"
                   style={!isPlaying ? { marginLeft: 4 } : {}}
                 />
               </TouchableOpacity>
@@ -401,12 +429,10 @@ function VideoPlayerModal({
               )}
             </View>
 
-            {/* Bottom Controls Bar */}
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)']}
               style={[modalStyles.bottomControls, { paddingBottom: insets.bottom + 20 }]}
             >
-              {/* Dream Info */}
               <View style={modalStyles.dreamInfo}>
                 <Text style={modalStyles.dreamTitle} numberOfLines={2}>
                   {dream.prompt}
@@ -416,20 +442,19 @@ function VideoPlayerModal({
                 </Text>
               </View>
 
-              {/* Progress Bar */}
               <View style={modalStyles.progressContainer}>
                 <Text style={modalStyles.timeText}>{formatTime(position)}</Text>
-                
+
                 <View style={modalStyles.progressBarContainer}>
                   <View style={modalStyles.progressTrack} />
-                  <View 
+                  <View
                     style={[
-                      modalStyles.progressFill, 
+                      modalStyles.progressFill,
                       { width: duration > 0 ? `${(position / duration) * 100}%` : '0%' }
-                    ]} 
+                    ]}
                   />
                 </View>
-                
+
                 <Text style={modalStyles.timeText}>{formatTime(duration)}</Text>
               </View>
             </LinearGradient>
@@ -440,7 +465,6 @@ function VideoPlayerModal({
   );
 }
 
-// Main Library Screen Component
 export default function LibraryScreen() {
   const [items, setItems] = useState<DreamItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -485,20 +509,20 @@ export default function LibraryScreen() {
 
   const createShortTitle = (prompt: string): string => {
     if (!prompt) return 'Untitled Dream';
-    
+
     const sentences = prompt.split(/[.!?]+/);
     const firstSentence = sentences[0]?.trim();
-    
+
     if (!firstSentence) return 'Untitled Dream';
     if (firstSentence.length <= 40) return firstSentence;
-    
+
     const words = firstSentence.split(' ');
     let title = '';
     for (const word of words) {
       if ((title + word).length > 35) break;
       title += (title ? ' ' : '') + word;
     }
-    
+
     return title + (title.length < firstSentence.length ? '...' : '');
   };
 
@@ -507,33 +531,31 @@ export default function LibraryScreen() {
     const now = new Date();
     const diffInMs = now.getTime() - date.getTime();
     const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-    
+
     if (diffInDays === 0) return 'Today';
     if (diffInDays === 1) return 'Yesterday';
     if (diffInDays < 7) return `${diffInDays} days ago`;
-    
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
+
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric',
       year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
     });
   };
 
   const renderDreamItem = ({ item }: { item: DreamItem }) => {
-    // Check if this is a stitched video (has multiple clips or a single videoUrl)
     const hasMultipleClips = Boolean(item.clips && Array.isArray(item.clips) && item.clips.length > 1);
     const isStitched = hasMultipleClips || Boolean(item.videoUrl && typeof item.videoUrl === 'string');
-    
+
     return (
-      <TouchableOpacity 
-        style={styles.videoCard} 
+      <TouchableOpacity
+        style={styles.videoCard}
         activeOpacity={0.9}
         onPress={() => handleDreamPress(item)}
       >
-        {/* Netflix-Style 16:9 Thumbnail */}
         <View style={styles.thumbnailContainer}>
-          {item.coverUrl && typeof item.coverUrl === 'string' ? (
-            <Image source={{ uri: item.coverUrl }} style={styles.thumbnail} />
+          {item.thumbnailUrl && typeof item.thumbnailUrl === 'string' ? (
+            <Image source={{ uri: item.thumbnailUrl }} style={styles.thumbnail} />
           ) : (
             <LinearGradient
               colors={['#667eea', '#764ba2']}
@@ -542,15 +564,13 @@ export default function LibraryScreen() {
               <Ionicons name="videocam" size={32} color="rgba(255,255,255,0.8)" />
             </LinearGradient>
           )}
-          
-          {/* Netflix Play Button Overlay */}
+
           <View style={styles.playOverlay}>
             <View style={styles.playButton}>
               <Ionicons name="play" size={16} color="#7C86FF" />
             </View>
           </View>
-          
-          {/* Cinema Badge for multi-clip videos */}
+
           {hasMultipleClips && (
             <LinearGradient
               colors={['#FF6B6B', '#FF8E8E']}
@@ -559,8 +579,7 @@ export default function LibraryScreen() {
               <Text style={styles.cinemaText}>CINEMA</Text>
             </LinearGradient>
           )}
-          
-          {/* Duration Badge - Show "Dream Movie" for stitched videos */}
+
           {isStitched ? (
             <LinearGradient
               colors={['#7C86FF', '#9D6FFF']}
@@ -575,8 +594,7 @@ export default function LibraryScreen() {
             </View>
           )}
         </View>
-        
-        {/* Video Info */}
+
         <View style={styles.videoInfo}>
           <Text style={styles.videoTitle} numberOfLines={2}>
             {createShortTitle(item.prompt)}
@@ -591,18 +609,18 @@ export default function LibraryScreen() {
 
   return (
     <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={{ flex: 1 }}>
-      <StatusBar 
+      <StatusBar
         translucent={Platform.OS === 'android'}
         backgroundColor="transparent"
         barStyle="light-content"
       />
-      
-      <View style={{ 
+
+      <View style={{
         flex: 1,
         paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : insets.top,
       }}>
         <Text style={styles.title}>Your Dreams</Text>
-        
+
         <FlatList
           data={items}
           keyExtractor={(d) => d.id}
@@ -644,34 +662,33 @@ export default function LibraryScreen() {
   );
 }
 
-// Professional Modal Styles with Android Font Fixes
 const modalStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
   },
-  
+
   videoContainer: {
     flex: 1,
     position: 'relative',
   },
-  
+
   videoTouchArea: {
     flex: 1,
   },
-  
+
   video: {
     width: '100%',
     height: '100%',
   },
-  
+
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   loadingSpinner: {
     width: 40,
     height: 40,
@@ -681,25 +698,25 @@ const modalStyles = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 16,
   },
-  
+
   loadingText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
-  
+
   videoPlaceholder: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
   },
-  
+
   processingIcon: {
     marginBottom: 20,
   },
-  
+
   videoPlaceholderText: {
     color: '#fff',
     fontSize: 18,
@@ -708,7 +725,7 @@ const modalStyles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
-  
+
   dreamPrompt: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 16,
@@ -717,14 +734,14 @@ const modalStyles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
-  
+
   processingCloseContainer: {
     position: 'absolute',
     top: 50,
     right: 20,
     zIndex: 10,
   },
-  
+
   processingCloseButton: {
     width: 44,
     height: 44,
@@ -733,12 +750,12 @@ const modalStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   controlsOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
   },
-  
+
   topControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -746,12 +763,12 @@ const modalStyles = StyleSheet.create({
     paddingVertical: 12,
     minHeight: 60,
   },
-  
+
   titleContainer: {
     flex: 1,
     marginHorizontal: 16,
   },
-  
+
   videoTitle: {
     color: '#FFFFFF',
     fontSize: 18,
@@ -759,20 +776,20 @@ const modalStyles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     marginBottom: 2,
   },
-  
+
   videoSubtitle: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
     fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
-  
+
   topActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  
+
   controlButton: {
     width: 44,
     height: 44,
@@ -781,14 +798,14 @@ const modalStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   centerControls: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 40,
   },
-  
+
   playButton: {
     width: 80,
     height: 80,
@@ -802,7 +819,7 @@ const modalStyles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  
+
   skipButton: {
     width: 60,
     height: 60,
@@ -811,16 +828,16 @@ const modalStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   bottomControls: {
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  
+
   dreamInfo: {
     marginBottom: 16,
   },
-  
+
   dreamTitle: {
     color: '#fff',
     fontSize: 16,
@@ -829,20 +846,20 @@ const modalStyles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 4,
   },
-  
+
   dreamDate: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
     fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
   },
-  
+
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  
+
   timeText: {
     color: '#fff',
     fontSize: 12,
@@ -851,7 +868,7 @@ const modalStyles = StyleSheet.create({
     minWidth: 35,
     textAlign: 'center',
   },
-  
+
   progressBarContainer: {
     flex: 1,
     height: 4,
@@ -859,12 +876,12 @@ const modalStyles = StyleSheet.create({
     borderRadius: 2,
     overflow: 'hidden',
   },
-  
+
   progressTrack: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(255,255,255,0.3)',
   },
-  
+
   progressFill: {
     height: '100%',
     backgroundColor: '#FF0000',
@@ -872,7 +889,6 @@ const modalStyles = StyleSheet.create({
   },
 });
 
-// Library Styles with Android Font Fixes
 const styles = StyleSheet.create({
   title: {
     fontSize: Platform.OS === 'android' ? 40 : 45,
@@ -883,12 +899,12 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? 8 : 4,
     paddingBottom: Platform.OS === 'android' ? 16 : 24,
   },
-  
+
   row: {
     justifyContent: 'space-between',
     paddingHorizontal: 0,
   },
-  
+
   videoCard: {
     width: '48%',
     backgroundColor: '#fff',
@@ -907,26 +923,26 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  
+
   thumbnailContainer: {
     position: 'relative',
     width: '100%',
-    aspectRatio: 16/9,
+    aspectRatio: 16 / 9,
   },
-  
+
   thumbnail: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  
+
   placeholderThumbnail: {
     width: '100%',
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
+
   playOverlay: {
     position: 'absolute',
     top: 0,
@@ -937,7 +953,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.25)',
   },
-  
+
   playButton: {
     width: 56,
     height: 56,
@@ -977,7 +993,7 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  
+
   cinemaText: {
     color: '#FFFFFF',
     fontSize: 11,
@@ -985,7 +1001,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     letterSpacing: 0.8,
   },
-  
+
   durationBadge: {
     position: 'absolute',
     bottom: 12,
@@ -995,7 +1011,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
   },
-  
+
   durationText: {
     color: '#FFFFFF',
     fontSize: 12,
@@ -1032,11 +1048,11 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
     letterSpacing: 0.3,
   },
-  
+
   videoInfo: {
     padding: 16,
   },
-  
+
   videoTitle: {
     fontSize: 15,
     fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
@@ -1045,21 +1061,21 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 6,
   },
-  
+
   videoDate: {
     fontSize: 12,
     fontWeight: Platform.OS === 'ios' ? '500' : 'normal',
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
     color: '#666666',
   },
-  
+
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 40, // 🔥 CHANGED FROM 80 to 40 - MOVES IT HIGHER!
+    paddingTop: 40,
   },
-  
+
   emptyText: {
     fontSize: 24,
     fontWeight: Platform.OS === 'ios' ? '700' : 'bold',
@@ -1068,7 +1084,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 12,
   },
-  
+
   emptySubtext: {
     fontSize: 16,
     fontWeight: Platform.OS === 'ios' ? '400' : 'normal',
@@ -1080,22 +1096,21 @@ const styles = StyleSheet.create({
   },
 });
 
-// Utility function
 const createShortTitle = (prompt: string): string => {
   if (!prompt) return 'Untitled Dream';
-  
+
   const sentences = prompt.split(/[.!?]+/);
   const firstSentence = sentences[0]?.trim();
-  
+
   if (!firstSentence) return 'Untitled Dream';
   if (firstSentence.length <= 40) return firstSentence;
-  
+
   const words = firstSentence.split(' ');
   let title = '';
   for (const word of words) {
     if ((title + word).length > 35) break;
     title += (title ? ' ' : '') + word;
   }
-  
+
   return title + (title.length < firstSentence.length ? '...' : '');
 };

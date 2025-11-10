@@ -1,15 +1,21 @@
-// app/utils/generateVideoKling.ts - FINAL VERSION
+// app/utils/generateVideoKling.ts - HYBRID: Smart cleaning + getScenePlan variations
 import * as FileSystem from "expo-file-system";
 import { getScenePlan } from "./enhancePrompt";
 import { stitchWithCloudinary, uploadImage } from "./cloudinaryStitch";
 import { generateSceneImage } from "./sceneImageGenerator";
 import { addAudioToVideo } from "./addAudioToVideo";
+import { processPromptForGeneration } from "./smartPromptProcessor";
 
 const DURATION = "5" as "5";
 const CFG = 0.5;
 const USE_SCENE_IMAGE_GEN = process.env.EXPO_PUBLIC_USE_SCENE_IMAGE_GEN === "1";
-const ENABLE_AUDIO = process.env.EXPO_PUBLIC_ENABLE_AUDIO !== "0";
+const ENABLE_AUDIO = process.env.EXPO_PUBLIC_ENABLE_AUDIO === "1";
 const MAX_RETRIES = 2;
+
+// 🔥 IMPROVED NEGATIVE PROMPT
+const KLING_NEGATIVE_PROMPT = 
+  "blur, distort, low quality, warping, morphing, artifacts, " +
+  "flickering, choppy motion, face distortion, unnatural physics";
 
 function falKey(): string {
   const k =
@@ -37,8 +43,14 @@ async function retryOperation<T>(
       
       const errorMsg = `${error?.message || error}`.toLowerCase();
       
-      if (errorMsg.includes('unauthorized') || errorMsg.includes('api key') || errorMsg.includes('forbidden')) {
-        console.log(`⚠️ Auth/config error detected, not retrying`);
+      // 🛡️ Don't retry content rejections or auth errors
+      if (
+        errorMsg.includes('content_rejected_by_api') ||
+        errorMsg.includes('unauthorized') || 
+        errorMsg.includes('api key') || 
+        errorMsg.includes('forbidden')
+      ) {
+        console.log(`⚠️ Non-retryable error detected, stopping immediately`);
         throw error;
       }
       
@@ -64,14 +76,21 @@ async function extractVideoThumbnail(videoUri: string): Promise<string | null> {
   }
 }
 
+/**
+ * 🛡️ WITH BILLING PROTECTION: Detects Kling content rejections
+ */
 async function klingI2V(prompt: string, imageUrl: string): Promise<{ localUri: string; coverUrl: string | null }> {
   const endpoint = "https://fal.run/fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+  
+  console.log(`🎬 Generating Kling video with prompt: "${prompt}"`);
+  
   const body: any = {
     prompt: prompt,
     image_url: imageUrl,
     duration: DURATION,
     cfg_scale: CFG,
-    negative_prompt: "blur, distort, low quality, artifacts",
+    aspect_ratio: "9:16",
+    negative_prompt: KLING_NEGATIVE_PROMPT,
   };
 
   const r = await fetch(endpoint, {
@@ -80,8 +99,29 @@ async function klingI2V(prompt: string, imageUrl: string): Promise<{ localUri: s
     body: JSON.stringify(body),
   });
   
+  // 🛡️ BILLING PROTECTION: Check if content was rejected
   if (!r.ok) {
     const errorText = await r.text();
+    console.error("❌ Kling API Error:", r.status, errorText);
+    
+    const errorLower = errorText.toLowerCase();
+    if (
+      r.status === 400 ||
+      r.status === 403 ||
+      errorLower.includes("content") ||
+      errorLower.includes("policy") ||
+      errorLower.includes("inappropriate") ||
+      errorLower.includes("safety") ||
+      errorLower.includes("nsfw") ||
+      errorLower.includes("violat") ||
+      errorLower.includes("forbidden") ||
+      errorLower.includes("blocked") ||
+      errorLower.includes("rejected")
+    ) {
+      console.error("🚫 Content rejected by Kling - STOPPING to prevent more charges");
+      throw new Error("CONTENT_REJECTED_BY_API");
+    }
+    
     throw new Error(`Kling i2v ${r.status}: ${errorText}`);
   }
   
@@ -139,38 +179,89 @@ export async function generate3ClipKlingParallel(
 
   console.log(`👥 Generating with ${faceUris.length} character(s)`);
 
+  // 🔥 STEP 1: Smart cleaning (removes explicit, celebrities)
+  console.log('🧠 Smart cleaning prompt...');
+  const processed = await retryOperation(
+    () => processPromptForGeneration(rawPrompt),
+    "Smart Prompt Processing"
+  ).catch((error) => {
+    throw new Error(`Prompt processing failed: ${error.message}`);
+  });
+
+  if (processed.isBlocked) {
+    console.log(`🚫 Prompt blocked: ${processed.blockReason}`);
+    throw new Error(`Your dream contains inappropriate content. Please try a different dream!`);
+  }
+
+  const cleanPrompt = processed.cleanPrompt || "person in a dream scene";
+  console.log(`✅ Clean prompt: "${cleanPrompt}"`);
+
+  // 🔥 STEP 2: Let getScenePlan create natural variations from the SIMPLE clean prompt
   const plan = await retryOperation(
-    () => getScenePlan(rawPrompt),
+    () => getScenePlan(cleanPrompt),
     "Scene Planning"
   ).catch((error) => {
     throw new Error(`Scene planning failed: ${error.message}`);
   });
   
   console.log("📝 Base:", plan.basePrompt);
-  console.log("🎬 Acts:", plan.acts);
+  console.log("🎬 Natural variations:", plan.acts);
 
+  // 🔥 STEP 3: Generate scene images with Nano Banana (WITH SCENE CHAINING!)
   onProgress?.(0, 9, "Creating scenes...");
   const sceneImages: string[] = [];
+  let establishingImage: string | undefined; // 🔗 Store Scene 1 for consistency
   
   for (let i = 0; i < plan.acts.length; i++) {
     onProgress?.(i + 1, 9, `Scene ${i + 1}/3...`);
     
-    const sceneImage = await retryOperation(
-      () => generateSceneImage(faceUris, plan.acts[i]),
-      `Scene Image ${i + 1}/3`,
-      1
-    );
-    
-    sceneImages.push(sceneImage);
-    console.log(`✅ Scene ${i + 1}/3 ready`);
+    try {
+      // 🔗 SCENE CHAINING: Use Scene 1 as base for Scenes 2 & 3
+      const useBaseImage = i > 0 && establishingImage;
+      
+      if (useBaseImage) {
+        console.log(`🔗 [Scene ${i + 1}] Using Scene 1 as base for perfect consistency`);
+      } else {
+        console.log(`🎨 [Scene ${i + 1}] Generating fresh with face photos`);
+      }
+      
+      const sceneImage = await retryOperation(
+        () => generateSceneImage(
+          faceUris, 
+          plan.acts[i],
+          useBaseImage ? establishingImage : undefined  // Pass Scene 1 for 2 & 3
+        ),
+        `Scene Image ${i + 1}/3`,
+        1
+      );
+      
+      sceneImages.push(sceneImage);
+      
+      // 🔗 Lock in the establishing shot (Scene 1)
+      if (i === 0) {
+        establishingImage = sceneImage;
+        console.log(`✅ Scene 1 locked as establishing shot for consistency chain`);
+      } else {
+        console.log(`✅ Scene ${i + 1}/3 ready with consistency from Scene 1`);
+      }
+      
+    } catch (error: any) {
+      // 🛡️ BILLING PROTECTION: Catch content rejections and STOP
+      if (error.message === "CONTENT_REJECTED_BY_API") {
+        console.error(`🚫 Scene ${i + 1} rejected by NanoBanana - STOPPING`);
+        throw new Error("Content not allowed by AI service. Please try a different dream.");
+      }
+      throw error;
+    }
     
     if (i < plan.acts.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
 
-  console.log("✅ All 3 scenes ready");
+  console.log("✅ All 3 scenes ready with perfect consistency chain!");
 
+  // 🔥 STEP 4: Animate with Kling 2.5 Turbo
   onProgress?.(3, 9, "Animating...");
   
   const jobs = plan.acts.map((act, i) =>
@@ -180,20 +271,39 @@ export async function generate3ClipKlingParallel(
     ).then((r) => {
       onProgress?.(4 + i, 9, `Video ${i + 1}/3...`);
       return r;
-    }).catch((error) => {
-      console.error(`❌ Failed to generate video ${i + 1}/3 after retries:`, error);
+    }).catch((error: any) => {
+      console.error(`❌ Failed to generate video ${i + 1}/3:`, error);
+      
+      // 🛡️ BILLING PROTECTION: Catch content rejections and STOP
+      if (error.message === "CONTENT_REJECTED_BY_API") {
+        console.error(`🚫 Video ${i + 1} rejected by Kling - STOPPING`);
+        throw new Error("CONTENT_REJECTED_BY_KLING");
+      }
+      
       throw new Error(`Video generation failed for scene ${i + 1}: ${error.message}`);
     })
   );
   
-  const results = await Promise.all(jobs);
+  let results;
+  try {
+    results = await Promise.all(jobs);
+  } catch (error: any) {
+    // 🛡️ Catch Kling rejections
+    if (error.message === "CONTENT_REJECTED_BY_KLING") {
+      throw new Error("Content not allowed by AI service. Please try a different dream.");
+    }
+    throw error;
+  }
+  
   let localClips = results.map((r) => r.localUri);
   const coverUrl = results[0]?.coverUrl ?? null;
 
   console.log("✅ All 3 Kling videos generated");
 
+  // 🔥 STEP 5: Audio (Optional - disabled by default)
   if (ENABLE_AUDIO) {
-    console.log("🎵 Starting Mirelo SFX audio enhancement...");
+    console.log("🎵 Starting audio enhancement...");
+    console.log("⚠️ WARNING: This adds $0.23 per clip ($0.69 total)");
     onProgress?.(7, 9, "Adding sound effects...");
     
     const audioEnhancedClips: string[] = [];
@@ -211,11 +321,7 @@ export async function generate3ClipKlingParallel(
         console.log(`✅ Uploaded to Cloudinary: ${publicUrl}`);
         
         const enhancedVideo = await retryOperation(
-          () => addAudioToVideo(
-            publicUrl,
-            plan.acts[i],
-            5
-          ),
+          () => addAudioToVideo(publicUrl, plan.acts[i], 5),
           `Mirelo Audio ${i + 1}/3`,
           1
         );
@@ -227,18 +333,19 @@ export async function generate3ClipKlingParallel(
         onProgress?.(7 + i / 3, 9, `Audio ${i + 1}/3...`);
         
       } catch (error) {
-        console.error(`⚠️ Failed to add audio to clip ${i + 1} after retries:`, error);
-        console.log(`ℹ️ Continuing with clip ${i + 1} without audio (graceful degradation)`);
+        console.error(`⚠️ Failed to add audio to clip ${i + 1}:`, error);
+        console.log(`ℹ️ Continuing with clip ${i + 1} without audio`);
         audioEnhancedClips.push(localClips[i]);
       }
     }
     
     localClips = audioEnhancedClips;
-    console.log(`✅ Audio enhancement complete (${audioSuccessCount}/3 clips with audio)`);
+    console.log(`✅ Audio complete (${audioSuccessCount}/3 clips with audio)`);
   } else {
-    console.log("ℹ️ Audio enhancement disabled");
+    console.log("ℹ️ Audio disabled (saves $0.69 per generation)");
   }
 
+  // 🔥 STEP 6: Stitch videos
   onProgress?.(8, 9, "Stitching...");
   let stitchedVideoUrl = localClips[0];
   
@@ -249,16 +356,17 @@ export async function generate3ClipKlingParallel(
     );
     console.log("✅ Stitched successfully");
   } catch (e) {
-    console.warn("⚠️ Stitch failed after retries, returning first clip:", e);
+    console.warn("⚠️ Stitch failed, returning first clip:", e);
   }
 
   const dt = Date.now() - t0;
   const per5s = Number(process.env.EXPO_PUBLIC_KLING_PRICE_PER5S || 0.30);
   const audioPerSec = 0.007;
   const audioCost = ENABLE_AUDIO ? (audioPerSec * 5 * 3) : 0;
-  const totalCost = (per5s * 3) + (0.05 * 3) + audioCost;
+  const sceneImageCost = 0.05 * 3;
+  const totalCost = (per5s * 3) + sceneImageCost + audioCost;
 
-  console.log(`💰 Total cost: $${totalCost.toFixed(2)} (with audio: ${ENABLE_AUDIO})`);
+  console.log(`💰 Total cost: $${totalCost.toFixed(2)} (audio: ${ENABLE_AUDIO ? 'YES' : 'NO'})`);
   console.log(`⏱️ Generation time: ${(dt / 1000).toFixed(1)}s`);
 
   return {

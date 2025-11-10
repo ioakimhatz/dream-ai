@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx - PRODUCTION VERSION WITH REAL REVENUECAT
+// app/(tabs)/index.tsx - WITH VIEW IN LIBRARY BUTTON
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -28,16 +28,16 @@ import { v4 as uuid } from 'uuid';
 
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { removeBackground } from '../utils/backgroundRemoval';
-import { generateDreamVideo } from '../utils/generateDreamVideo';
 import { analyzePromptStrength } from '../utils/promptValidator';
 import { saveDream } from '../utils/storage';
 import { transcribeAudio } from '../utils/transcribe';
-import { 
-  registerForPushNotifications, 
+import {
+  registerForPushNotifications,
   sendVideoReadyNotification,
   sendVideoFailedNotification,
-  registerBackgroundTask 
+  saveFCMToken,
 } from '../utils/notificationService';
 
 import { SubscriptionModal } from '@/components/SubscriptionModal';
@@ -64,6 +64,7 @@ function getStrengthColor(a: PromptAnalysis): string {
     default: return '#999999';
   }
 }
+
 function getStrengthMessage(a: PromptAnalysis): string {
   switch (a.strength) {
     case 'WEAK': return 'Add more details for better results';
@@ -74,22 +75,24 @@ function getStrengthMessage(a: PromptAnalysis): string {
   }
 }
 
-const PromptStrengthIndicator = ({ prompt, onAnalysisChange }: {
-  prompt: string; onAnalysisChange?: (a: PromptAnalysis) => void;
+const PromptStrengthIndicator = ({ prompt, onAnalysisChange, userLanguage }: {
+  prompt: string;
+  onAnalysisChange?: (a: PromptAnalysis) => void;
+  userLanguage: string;
 }) => {
   const analysis = React.useMemo(() => {
     if (!prompt.trim()) {
-      return { 
-        strength: 'WEAK' as const, 
-        score: 0, 
+      return {
+        strength: 'WEAK' as const,
+        score: 0,
         issues: ['Start typing your dream...'],
-        suggestions: ['Describe who, what, where, and how you felt'], 
+        suggestions: ['Describe who, what, where, and how you felt'],
         canGenerate: false,
         hasAdultContent: false
       };
     }
-    return analyzePromptStrength(prompt);
-  }, [prompt]);
+    return analyzePromptStrength(prompt, userLanguage);
+  }, [prompt, userLanguage]);
 
   React.useEffect(() => { onAnalysisChange?.(analysis); }, [analysis, onAnalysisChange]);
 
@@ -144,6 +147,8 @@ const PromptStrengthIndicator = ({ prompt, onAnalysisChange }: {
 };
 
 export default function HomeScreen() {
+  const { language } = useLanguage();
+
   useEffect(() => {
     const fix = () => {
       if (Platform.OS === 'android') {
@@ -152,10 +157,11 @@ export default function HomeScreen() {
         RNStatusBar.setBarStyle('light-content', true);
       }
     };
-    fix(); const t = setTimeout(fix, 100); return () => clearTimeout(t);
+    fix();
+    const t = setTimeout(fix, 100);
+    return () => clearTimeout(t);
   }, []);
 
-  // ✅ FIX #1: Request microphone permission on app load
   useEffect(() => {
     const requestMicPermission = async () => {
       try {
@@ -166,8 +172,8 @@ export default function HomeScreen() {
             'Dream AI needs microphone access to record your dreams. Please enable it in Settings.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Open Settings', 
+              {
+                text: 'Open Settings',
                 onPress: () => {
                   if (Platform.OS === 'ios') {
                     Linking.openURL('app-settings:');
@@ -187,28 +193,34 @@ export default function HomeScreen() {
     requestMicPermission();
   }, []);
 
-  // ✅ REQUEST NOTIFICATION PERMISSIONS on app load
+  const { user } = useAuth();
+
   useEffect(() => {
     const setupNotifications = async () => {
       try {
-        await registerForPushNotifications();
-        await registerBackgroundTask();
+        const token = await registerForPushNotifications();
+
+        if (token && user) {
+          await saveFCMToken(user.id, token);
+          console.log('✅ FCM token saved for user:', user.id);
+        }
+
         console.log('✅ Notifications configured');
       } catch (error) {
         console.error('Failed to setup notifications:', error);
       }
     };
 
-    setupNotifications();
-  }, []);
+    if (user) {
+      setupNotifications();
+    }
+  }, [user]);
 
-  const { user, updateSubscription } = useAuth();
-  
-  // ✅ FIXED: Added offerings, purchaseSubscription, restorePurchases
   const {
     dreamUsage,
     subscription,
     useDream,
+    refundDream,
     offerings,
     purchaseSubscription,
     restorePurchases,
@@ -216,6 +228,7 @@ export default function HomeScreen() {
 
   const [showPaywall, setShowPaywall] = useState(false);
   const [showBlurredPreview, setShowBlurredPreview] = useState(false);
+  const [isPurchasing, setIsPurchasing] = useState(false);
 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [transcript, setTranscript] = useState('');
@@ -223,7 +236,7 @@ export default function HomeScreen() {
   const [currentLanguage, setCurrentLanguage] = useState('en');
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const generationLockRef = useRef(false); // ✅ Prevents duplicate API calls
+  const generationLockRef = useRef(false);
 
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [processedImages, setProcessedImages] = useState<Map<string, boolean>>(new Map());
@@ -232,6 +245,7 @@ export default function HomeScreen() {
   const [finalVideoUri, setFinalVideoUri] = useState<string | null>(null);
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
 
   const [promptAnalysis, setPromptAnalysis] = useState<PromptAnalysis | null>(null);
 
@@ -264,7 +278,6 @@ export default function HomeScreen() {
     }, [])
   );
 
-  // ✅ PAUSE VIDEO: When switching tabs, pause the video
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
@@ -291,7 +304,6 @@ export default function HomeScreen() {
     })();
   }, []);
 
-  // ✅ AUTO-STOP: Stop recording when app goes to background
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
@@ -307,7 +319,6 @@ export default function HomeScreen() {
     };
   }, [recording]);
 
-  // ✅ Cleanup timer on unmount
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) {
@@ -353,8 +364,7 @@ export default function HomeScreen() {
       setRecording(recording);
       setRecordingDuration(0);
 
-      // ✅ AUTO-STOP: Start timer and auto-stop after 3 minutes (180 seconds)
-      const MAX_RECORDING_DURATION = 180; // 3 minutes
+      const MAX_RECORDING_DURATION = 180;
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
@@ -374,20 +384,19 @@ export default function HomeScreen() {
 
   const stopRecording = async () => {
     if (!recording) return;
-    
-    // ✅ Clear the recording timer
+
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
-    
+
     setIsTranscribing(true);
     setRecording(null);
     setRecordingDuration(0);
-    
+
     try {
       await recording.stopAndUnloadAsync();
-      
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -400,10 +409,9 @@ export default function HomeScreen() {
         return;
       }
 
-      const savedLanguage = await AsyncStorage.getItem('language');
-      const languageToUse = savedLanguage || currentLanguage || 'en';
+      const languageToUse = language || currentLanguage || 'en';
       console.log('🎤 Transcribing with language:', languageToUse);
-      
+
       const result = await transcribeAudio(uri, languageToUse);
       setTranscript(result);
     } catch (e) {
@@ -431,7 +439,10 @@ export default function HomeScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images' as any, allowsEditing: true, aspect: [1, 1], quality: 0.8,
+        mediaTypes: 'images' as any,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
       });
       if (!result.canceled && result.assets[0]) {
         const originalImage = result.assets[0].uri;
@@ -439,14 +450,18 @@ export default function HomeScreen() {
         try {
           const processed = await removeBackground(originalImage, { size: 'preview', type: 'person' });
           setSelectedImages(prev => [...prev, processed]);
-          const map = new Map(processedImages); map.set(processed, processed !== originalImage); setProcessedImages(map);
+          const map = new Map(processedImages);
+          map.set(processed, processed !== originalImage);
+          setProcessedImages(map);
           if (processed !== originalImage) {
             Alert.alert('Background Removed!', 'Your face will blend naturally into the dream video.', [{ text: 'Great!', style: 'default' }]);
           }
         } catch (err) {
           console.error('Error processing image:', err);
           setSelectedImages(prev => [...prev, originalImage]);
-        } finally { setIsProcessingImage(false); }
+        } finally {
+          setIsProcessingImage(false);
+        }
       }
     } catch (err) {
       console.error('Error picking image:', err);
@@ -454,100 +469,175 @@ export default function HomeScreen() {
       setIsProcessingImage(false);
     }
   };
+
   const removeImage = (i: number) => setSelectedImages(prev => prev.filter((_, idx) => idx !== i));
 
   const proceedWithGeneration = useCallback(async () => {
-    // ✅ CRITICAL: Check ref-based lock to prevent duplicate API calls
     if (generationLockRef.current) {
       console.log('⚠️ Generation locked, preventing duplicate API call');
       return;
     }
 
     try {
-      if (!transcript) return;
-      
-      // ✅ Set lock immediately
+      if (!transcript || !user) return;
+
       generationLockRef.current = true;
-      
+
       setIsGenerating(true);
       setFinalVideoUri(null);
       setCoverImage(null);
       setGenerationProgress(0);
-      setGenerationStep('');
-      
-      const { videoUrls, coverUrl, refundUser } = await generateDreamVideo(
-        transcript,
-        selectedImages,
-        (step: string, p: number) => {
-          setGenerationStep(step);
-          setGenerationProgress(p);
-        }
-      );
-      
-      const stitchedVideoUrl = videoUrls[0];
-      setFinalVideoUri(stitchedVideoUrl);
-      setCoverImage(coverUrl ?? null);
-      setVideoKey(prev => prev + 1);
-      
-      await saveDream({
-        id: uuid(),
-        createdAt: Date.now(),
-        prompt: transcript,
-        coverUrl: coverUrl ?? null,
-        videoUrl: stitchedVideoUrl,
-        clips: undefined,
-        duration: 15
-      });
-      
-      // ✅ SEND NOTIFICATION: Dream is ready!
-      await sendVideoReadyNotification(stitchedVideoUrl);
-      
-      Alert.alert('Dream Created!', 'Your dream cinema is ready!');
-      
-    } catch (err: any) {
-      console.error('❌ [DREAM AI] Error generating dream cinema:', err);
-      
-      const shouldRefund = err?.refundUser === true;
-      
-      if (shouldRefund) {
+      setGenerationStep('Preparing your dream...');
+
+      let cloudinaryImageUrls: string[] = [];
+
+      if (selectedImages.length > 0) {
+        setGenerationStep('Uploading face images...');
+        setGenerationProgress(3);
+
+        console.log(`📤 Uploading ${selectedImages.length} face image(s) to Cloudinary...`);
+
+        const { uploadImageToCloudinary } = await import('../utils/cloudinaryUpload');
+
         try {
-          if (dreamUsage.used > 0) {
-            await updateSubscription({
-              plan: dreamUsage.planId,
-              isActive: true,
-              renewalDate: new Date(dreamUsage.resetDate),
-              dreamsRemaining: dreamUsage.total - dreamUsage.used + 1,
-              totalDreams: dreamUsage.total,
-            });
-          }
-        } catch (refundError) {
-          console.error('Failed to refund dream:', refundError);
+          cloudinaryImageUrls = await Promise.all(
+            selectedImages.map(async (uri, index) => {
+              console.log(`📤 Uploading image ${index + 1}/${selectedImages.length}...`);
+              const cloudinaryUrl = await uploadImageToCloudinary(uri);
+              console.log(`✅ Image ${index + 1} uploaded: ${cloudinaryUrl}`);
+              return cloudinaryUrl;
+            })
+          );
+
+          console.log('✅ All face images uploaded to Cloudinary:', cloudinaryImageUrls);
+        } catch (uploadError: any) {
+          console.error('❌ Failed to upload face images:', uploadError);
+          throw new Error('Failed to upload face images. Please try again.');
         }
+      } else {
+        console.log('ℹ️ No face images to upload - generating from prompt only');
       }
-      
-      const userMessage = err?.userMessage || 'Failed to generate dream cinema. Please try again.';
-      
-      // ✅ SEND NOTIFICATION: Dream generation failed
-      await sendVideoFailedNotification();
-      
-      Alert.alert(
-        shouldRefund ? 'Generation Failed - Dream Restored' : 'Generation Failed',
-        userMessage,
-        [{ text: 'OK' }]
+
+      setGenerationStep('Creating your dream job...');
+      setGenerationProgress(5);
+
+      const { createDreamJob, subscribeToJob } = await import('../services/firestoreService');
+
+      const jobId = await createDreamJob({
+        userId: user.id,
+        prompt: transcript,
+        selectedImages: cloudinaryImageUrls.length > 0 ? cloudinaryImageUrls : undefined,
+        settings: {
+          model: 'kling',
+          duration: 15,
+          aspectRatio: '16:9',
+          scenes: 3,
+        },
+      });
+
+      console.log('✅ Dream job created:', jobId);
+      setGenerationStep('Job created! Processing on server...');
+
+      const unsubscribe = subscribeToJob(
+        jobId,
+        async (job) => {
+          console.log('🔄 Job update:', job.status, job.progress);
+
+          setGenerationProgress(job.progress);
+          setGenerationStep(job.currentStep || `Status: ${job.status}`);
+
+          if (job.status === 'completed' && job.videoUrl) {
+            console.log('✅ Job completed!');
+            console.log('🎬 Video URL:', job.videoUrl);
+
+            setGenerationStep('Finalizing video...');
+            setGenerationProgress(95);
+
+            console.log('⏰ Waiting 20 seconds for Cloudinary splice to process...');
+            await new Promise(resolve => setTimeout(resolve, 20000));
+
+            console.log('✅ Video should be ready now, displaying...');
+
+            setFinalVideoUri(job.videoUrl);
+            setCoverImage(job.thumbnailUrl ?? null);
+            setVideoKey(prev => prev + 1);
+            setIsGenerating(false);
+
+            // 🔥 FIXED: Save with thumbnailUrl instead of coverUrl
+            saveDream({
+              id: uuid(),
+              createdAt: Date.now(),
+              prompt: transcript,
+              thumbnailUrl: job.thumbnailUrl ?? null,  // ✅ CORRECT FIELD
+              videoUrl: job.videoUrl,
+              clips: undefined,
+              duration: 15,
+            });
+
+            sendVideoReadyNotification(job.videoUrl);
+            Alert.alert('Dream Created!', 'Your dream cinema is ready!');
+
+            unsubscribe();
+            generationLockRef.current = false;
+          }
+
+          if (job.status === 'failed') {
+            console.error('❌ Job failed:', job.error);
+            setIsGenerating(false);
+
+            try {
+              refundDream();
+            } catch (refundError) {
+              console.error('Failed to refund dream:', refundError);
+            }
+
+            Alert.alert(
+              'Generation Failed - Dream Restored',
+              job.error || 'Failed to generate dream cinema. Please try again.',
+              [{ text: 'OK' }]
+            );
+
+            sendVideoFailedNotification();
+
+            unsubscribe();
+            generationLockRef.current = false;
+          }
+        },
+        (error) => {
+          console.error('❌ Subscription error:', error);
+          setIsGenerating(false);
+          Alert.alert('Error', 'Lost connection to server. Please try again.');
+          generationLockRef.current = false;
+        }
       );
-      
-    } finally {
-      // ✅ Release lock
-      generationLockRef.current = false;
-      
+
+      setTimeout(() => {
+        if (generationLockRef.current) {
+          console.log('⏰ Generation timeout, cleaning up...');
+          unsubscribe();
+          setIsGenerating(false);
+          generationLockRef.current = false;
+          Alert.alert('Timeout', 'Generation is taking too long. Please try again.');
+        }
+      }, 10 * 60 * 1000);
+
+    } catch (err: any) {
+      console.error('❌ Error creating dream job:', err);
+
       setIsGenerating(false);
       setGenerationProgress(0);
       setGenerationStep('');
+      generationLockRef.current = false;
+
+      Alert.alert(
+        'Error',
+        err.message || 'Failed to create dream job. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
-  }, [transcript, selectedImages, updateSubscription, dreamUsage]);
+  }, [transcript, user, selectedImages, refundDream, saveDream, sendVideoReadyNotification, sendVideoFailedNotification]);
 
   const handleGenerateDream = async () => {
-    // ✅ CRITICAL: Prevent multiple simultaneous generations
     if (isGenerating) {
       console.log('⚠️ Generation already in progress, ignoring duplicate call');
       return;
@@ -595,50 +685,62 @@ export default function HomeScreen() {
     await proceedWithGeneration();
   };
 
-  // ✅ FIXED: USE REAL REVENUECAT PURCHASE!
   const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
-  const productMap: Record<string, string> = { 
-    weekly: 'dream_weekly', 
-    basic: 'dream_basic_monthly', 
-    pro: 'dream_pro_monthly' 
-  };
-  
-  const productId = productMap[planType];
-  
-  if (!offerings?.availablePackages) {
-    Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
-    return;
-  }
-  
-  console.log('💳 Looking for product ID:', productId);
-  
-  const packageToPurchase = offerings.availablePackages.find(
-    (p) => p.product.identifier === productId
-  );
-  
-  if (!packageToPurchase) {
-    Alert.alert('Error', 'Selected plan is not available. Please try again.');
-    return;
-  }
-  
-  console.log('✅ Found package:', packageToPurchase.identifier);
-  
-  const success = await purchaseSubscription(packageToPurchase);
+    if (isPurchasing) {
+      console.log('⚠️ Purchase already in progress, ignoring tap');
+      return;
+    }
 
-  if (success) {
-    // ✅ State is now updated immediately in purchaseSubscription()
-    setShowPaywall(false);
-    setShowBlurredPreview(false);
+    const productMap: Record<string, string> = {
+      weekly: 'dream_weekly',
+      basic: 'dream_basic_monthly',
+      pro: 'dream_pro_monthly'
+    };
 
-    Alert.alert(
-      'Success!',
-      `${planType.toUpperCase()} plan activated! Generating your dream now...`,
-      [{ text: 'OK', onPress: () => proceedWithGeneration() }]
+    const productId = productMap[planType];
+
+    if (!offerings?.availablePackages) {
+      Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
+      return;
+    }
+
+    console.log('💳 Looking for product ID:', productId);
+
+    const packageToPurchase = offerings.availablePackages.find(
+      (p) => p.product.identifier === productId
     );
-  }
-};
 
-  // ✅ FIXED: USE REAL RESTORE PURCHASES!
+    if (!packageToPurchase) {
+      Alert.alert('Error', 'Selected plan is not available. Please try again.');
+      return;
+    }
+
+    console.log('✅ Found package:', packageToPurchase.identifier);
+
+    setIsPurchasing(true);
+
+    try {
+      const success = await purchaseSubscription(packageToPurchase);
+
+      if (success) {
+        setShowPaywall(false);
+        setShowBlurredPreview(false);
+
+        proceedWithGeneration();
+
+        setTimeout(() => {
+          Alert.alert(
+            '🎉 Success!',
+            'Generating your dream cinema...',
+            [{ text: 'Great!', style: 'default' }]
+          );
+        }, 500);
+      }
+    } finally {
+      setIsPurchasing(false);
+    }
+  };
+
   const handleRestore = async () => {
     await restorePurchases();
   };
@@ -695,7 +797,11 @@ export default function HomeScreen() {
               editable
             />
 
-            <PromptStrengthIndicator prompt={transcript} onAnalysisChange={setPromptAnalysis} />
+            <PromptStrengthIndicator
+              prompt={transcript}
+              onAnalysisChange={setPromptAnalysis}
+              userLanguage={language}
+            />
 
             <View style={styles.imageSection}>
               <Text style={styles.imageSectionTitle}>Who was in your dream?</Text>
@@ -762,17 +868,43 @@ export default function HomeScreen() {
                 </View>
               ) : finalVideoUri ? (
                 <View style={styles.previewVideoContainer}>
+                  {isVideoLoading && (
+                    <View style={styles.videoLoadingOverlay}>
+                      <ActivityIndicator size="large" color={DREAM_PURPLE} />
+                      <Text style={styles.videoLoadingText}>Loading video...</Text>
+                    </View>
+                  )}
                   <Video
                     key={videoKey}
                     source={{ uri: finalVideoUri }}
                     style={styles.videoPlayer}
-                    useNativeControls={false}
+                    useNativeControls={true}
                     resizeMode={ResizeMode.COVER}
-                    shouldPlay={isFocused}
+                    shouldPlay={true}
                     isLooping
+                    onLoadStart={() => {
+                      console.log('📥 Video loading started...');
+                      setIsVideoLoading(true);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ Video loaded successfully!');
+                      setIsVideoLoading(false);
+                    }}
+                    onError={(error) => {
+                      console.error('❌ Video error:', error);
+                      setIsVideoLoading(false);
+                      Alert.alert('Video Error', 'Failed to load video: ' + JSON.stringify(error));
+                    }}
                   />
-                  <TouchableOpacity style={styles.replayButton} onPress={() => setVideoKey(prev => prev + 1)}>
-                    <Text style={styles.replayButtonText}>↻ Replay</Text>
+                  {/* 🔥 CHANGED: Replay → View in Library */}
+                  <TouchableOpacity
+                    style={styles.replayButton}
+                    onPress={() => {
+                      console.log('📚 View in Library pressed, navigating...');
+                      router.push('/(tabs)/library');
+                    }}
+                  >
+                    <Text style={styles.replayButtonText}>📚 View in Library</Text>
                   </TouchableOpacity>
                 </View>
               ) : coverImage ? (
@@ -793,6 +925,7 @@ export default function HomeScreen() {
         onRestore={handleRestore}
         onSelectPlan={handleSelectPlan}
         currentId={subscription?.id}
+        isPurchasing={isPurchasing}
       />
     </View>
   );
@@ -859,6 +992,22 @@ const styles = StyleSheet.create({
 
   previewVideoContainer: { width: '100%', height: 220, borderRadius: 15, overflow: 'hidden', position: 'relative', backgroundColor: '#000' },
   videoPlayer: { width: '100%', height: '100%' },
+  videoLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10
+  },
+  videoLoadingText: {
+    color: '#fff',
+    marginTop: 10,
+    fontSize: 14
+  },
   replayButton: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(114,120,230,0.9)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   replayButtonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
@@ -880,7 +1029,7 @@ const strengthStyles = StyleSheet.create({
   issueText: { fontSize: 14, color: '#dc3545', marginBottom: 4, lineHeight: 18 },
   suggestionsTitle: { fontSize: 14, fontWeight: '600', color: '#495057', marginBottom: 4 },
   suggestionText: { fontSize: 14, color: '#28a745', marginBottom: 4, lineHeight: 18 },
-  
+
   comingSoonContainer: {
     backgroundColor: '#EEF2FF',
     padding: 14,

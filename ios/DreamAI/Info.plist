@@ -46,11 +46,11 @@
 			<string>Google</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.967701675568-ipr1qtc009migtvem6nce0poq213ic6q</string>
+				<string>com.googleusercontent.apps.711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72</string>
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleVersion</key> 
+	<key>CFBundleVersion</key>
 	<string>10</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>

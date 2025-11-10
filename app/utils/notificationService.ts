@@ -1,9 +1,8 @@
-// app/utils/notificationService.ts
+// app/utils/notificationService.ts - Expo-compatible version (no native Firebase)
 import * as Notifications from 'expo-notifications';
-import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
-
-const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND-VIDEO-GENERATION-TASK';
+import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import { firestore } from '../config/firebaseConfig';
 
 // Configure how notifications should behave
 Notifications.setNotificationHandler({
@@ -11,51 +10,40 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-  }) as any, // Type assertion to avoid version-specific type mismatches
-});
-
-// Define background task for video generation
-TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
-  if (error) {
-    console.error('Background task error:', error);
-    return;
-  }
-  
-  console.log('Background task running:', data);
-  // This keeps the generation alive even when app is backgrounded
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
 });
 
 /**
- * Request notification permissions from user
+ * Request push notification permissions and get Expo Push Token
  */
 export async function registerForPushNotifications(): Promise<string | null> {
   try {
+    // Request permission
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-
+    
     if (existingStatus !== 'granted') {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
-
+    
     if (finalStatus !== 'granted') {
       console.log('❌ Notification permission denied');
       return null;
     }
-
+    
     console.log('✅ Notification permission granted');
-
-    // For iOS, we need to register for remote notifications
-    if (Platform.OS === 'ios') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#7278E6',
-      });
-    }
-
-    // For Android, create notification channel
+    
+    // Get Expo Push Token
+    const token = (await Notifications.getExpoPushTokenAsync({
+      projectId: '0fa46614-499e-4052-90a9-43f3c98b573b', // Your EAS project ID from app.json
+    })).data;
+    
+    console.log('📱 Expo Push Token:', token);
+    
+    // Create notification channels for Android
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('video-generation', {
         name: 'Dream Video Generation',
@@ -63,10 +51,19 @@ export async function registerForPushNotifications(): Promise<string | null> {
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#7278E6',
         sound: 'default',
+        description: 'Notifications for when your dream videos are ready',
+      });
+      
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Default',
+        importance: Notifications.AndroidImportance.DEFAULT,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#7278E6',
+        sound: 'default',
       });
     }
-
-    return 'success';
+    
+    return token;
   } catch (error) {
     console.error('Failed to register for notifications:', error);
     return null;
@@ -74,100 +71,104 @@ export async function registerForPushNotifications(): Promise<string | null> {
 }
 
 /**
- * Send local notification when video is ready
+ * Save Expo Push Token to Firestore
  */
-export async function sendVideoReadyNotification(
-  videoUrl?: string
-): Promise<void> {
+export async function saveFCMToken(userId: string, token: string): Promise<void> {
   try {
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '✨ Your Dream is Ready!',
-        body: 'Tap to view your dream cinema',
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-        vibrate: [0, 250, 250, 250],
-        data: { videoUrl, screen: 'dreams' },
+    const userRef = doc(firestore, 'users', userId);
+    await setDoc(
+      userRef,
+      {
+        pushToken: token,
+        pushTokenUpdatedAt: Timestamp.now(),
+        platform: Platform.OS,
       },
-      trigger: null, // Send immediately
-    });
-
-    console.log('✅ Notification sent: Dream is ready!');
+      { merge: true }
+    );
+    console.log('✅ Push token saved to Firestore for user:', userId);
   } catch (error) {
-    console.error('Failed to send notification:', error);
+    console.error('❌ Failed to save push token:', error);
+    throw error;
   }
 }
 
 /**
- * Send notification if generation fails
+ * Send a local notification when video is ready
+ * (Fallback for when push notifications fail)
+ */
+export async function sendVideoReadyNotification(videoUrl: string): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '🎬 Your Dream is Ready!',
+        body: 'Your dream video has been generated successfully. Tap to view!',
+        data: { videoUrl, type: 'video_ready' },
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+      },
+      trigger: null, // Send immediately
+    });
+    console.log('✅ Local notification sent: Video ready');
+  } catch (error) {
+    console.error('❌ Failed to send local notification:', error);
+  }
+}
+
+/**
+ * Send a local notification when video generation fails
  */
 export async function sendVideoFailedNotification(): Promise<void> {
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '❌ Dream Generation Failed',
-        body: 'Something went wrong. Your dream has been restored. Tap to try again.',
-        sound: true,
+        body: 'We couldn\'t generate your dream. Your credit has been restored. Please try again.',
+        data: { type: 'video_failed' },
+        sound: 'default',
         priority: Notifications.AndroidNotificationPriority.HIGH,
-        data: { screen: 'home' },
       },
       trigger: null,
     });
-
-    console.log('✅ Notification sent: Generation failed');
+    console.log('✅ Local notification sent: Video failed');
   } catch (error) {
-    console.error('Failed to send failure notification:', error);
+    console.error('❌ Failed to send local notification:', error);
   }
 }
 
 /**
- * Send progress notification (for Android)
+ * Setup notification listeners
  */
-export async function sendProgressNotification(
-  progress: number,
-  message: string
-): Promise<string | null> {
-  if (Platform.OS !== 'android') return null;
-
-  try {
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '🎬 Creating Your Dream...',
-        body: message,
-        sound: false,
-        priority: Notifications.AndroidNotificationPriority.LOW,
-        data: { progress },
-        sticky: true, // Makes it persistent
-      },
-      trigger: null,
-    });
-
-    return notificationId;
-  } catch (error) {
-    console.error('Failed to send progress notification:', error);
-    return null;
-  }
+export function setupNotificationListeners() {
+  // Handle notification received while app is in foreground
+  const foregroundSubscription = Notifications.addNotificationReceivedListener((notification) => {
+    console.log('📬 Notification received in foreground:', notification);
+  });
+  
+  // Handle notification tapped
+  const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    console.log('👆 Notification tapped:', response);
+    const { videoUrl, type } = response.notification.request.content.data;
+    
+    if (type === 'video_ready' && videoUrl) {
+      // Navigate to video or open it
+      console.log('📹 Opening video:', videoUrl);
+    }
+  });
+  
+  return () => {
+    foregroundSubscription.remove();
+    responseSubscription.remove();
+  };
 }
 
 /**
- * Cancel a notification
+ * Cancel all pending notifications
  */
-export async function cancelNotification(notificationId: string): Promise<void> {
+export async function cancelAllNotifications(): Promise<void> {
   try {
-    await Notifications.dismissNotificationAsync(notificationId);
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    console.log('✅ All scheduled notifications cancelled');
   } catch (error) {
-    console.error('Failed to cancel notification:', error);
-  }
-}
-
-/**
- * Register background task for video generation
- */
-export async function registerBackgroundTask(): Promise<void> {
-  try {
-    await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
-    console.log('✅ Background task registered');
-  } catch (error) {
-    console.error('Failed to register background task:', error);
+    console.error('❌ Failed to cancel notifications:', error);
   }
 }

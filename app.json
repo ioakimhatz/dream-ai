@@ -32,9 +32,12 @@
           "remote-notification"
         ]
       },
+      "entitlements": {
+        "aps-environment": "development"
+      },
       "config": {
         "googleSignIn": {
-          "reservedClientId": "com.googleusercontent.apps.967701675568-ipr1qtc009migtvem6nce0poq213ic6q"
+          "reservedClientId": "com.googleusercontent.apps.711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72"
         }
       }
     },
@@ -83,7 +86,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.967701675568-ipr1qtc009migtvem6nce0poq213ic6q"
+          "iosUrlScheme": "com.googleusercontent.apps.711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72"
         }
       ],
       [

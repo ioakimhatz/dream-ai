@@ -44,8 +44,11 @@ export async function uploadImage(localUri: string): Promise<string> {
 function buildSpliceUrl(publicIds: string[]): string {
   if (publicIds.length === 0) throw new Error("No public IDs to stitch");
   const [first, ...rest] = publicIds;
-  const tail = rest.map(id => `fl_splice,l_video:${id}`).join("/");
+
+  // ✅ CORRECT: l_video:ID,fl_splice/fl_layer_apply/ for each video
+  const tail = rest.map(id => `l_video:${id},fl_splice/fl_layer_apply`).join("/");
   const path = tail ? `${tail}/${first}.mp4` : `${first}.mp4`;
+
   return `https://res.cloudinary.com/${CLOUD}/video/upload/${path}`;
 }
 

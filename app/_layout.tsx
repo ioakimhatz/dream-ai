@@ -1,5 +1,6 @@
-// app/_layout.tsx
+// app/_layout.tsx - FIXED: Removed duplicate notification setup
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import './config/firebaseConfig'; // Initialize Firebase
 import { useFonts } from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter, useSegments } from 'expo-router';
@@ -12,6 +13,7 @@ import Purchases from 'react-native-purchases';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
+import { LanguageProvider } from './contexts/LanguageContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -22,7 +24,6 @@ function AppContent() {
   const router = useRouter();
   const segments = useSegments();
 
-  // 🔍 DEBUG LOGS - CHECK THESE IN CONSOLE!
   useEffect(() => {
     console.log('🔍 ============ APP STATE DEBUG ============');
     console.log('🔍 AUTH LOADING:', isLoading);
@@ -82,6 +83,9 @@ function AppContent() {
     initializeRevenueCat();
   }, [user]);
 
+  // 🔥 REMOVED: Notification setup is now handled in index.tsx where user is available
+  // This prevents duplicate initialization and ensures notifications are only set up when needed
+
   if (isLoading || checkingOnboarding) {
     console.log('⏳ SHOWING LOADING SCREEN - isLoading:', isLoading, 'checkingOnboarding:', checkingOnboarding);
     return (
@@ -96,21 +100,23 @@ function AppContent() {
 
   console.log('✅ RENDERING MAIN APP CONTENT');
   return (
-    <DreamUsageProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#FFFFFF' },
-          animation: 'fade',
-        }}
-        initialRouteName={hasSeenOnboarding ? '(tabs)' : '(auth)'}
-      >
-        <Stack.Screen name="(auth)" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-        <Stack.Screen name="+not-found" />
-        <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy', presentation: 'modal' }} />
-      </Stack>
-    </DreamUsageProvider>
+    <LanguageProvider>
+      <DreamUsageProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: '#FFFFFF' },
+            animation: 'fade',
+          }}
+          initialRouteName={hasSeenOnboarding ? '(tabs)' : '(auth)'}
+        >
+          <Stack.Screen name="(auth)" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+          <Stack.Screen name="+not-found" />
+          <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy', presentation: 'modal' }} />
+        </Stack>
+      </DreamUsageProvider>
+    </LanguageProvider>
   );
 }
 
@@ -123,8 +129,8 @@ export default function RootLayout() {
     if (Platform.OS !== 'web') {
       console.log('🔐 Configuring Google Sign In...');
       GoogleSignin.configure({
-        webClientId: '967701675568-0dj67qpsco2fr244m0tajvvnnu42c730.apps.googleusercontent.com',
-        iosClientId: '967701675568-ipr1qtc009migtvem6nce0poq213ic6q.apps.googleusercontent.com',
+        webClientId: '711898710429-4dmus2c07v62ouamv23rtl525gurntpq.apps.googleusercontent.com',
+        iosClientId: '711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72.apps.googleusercontent.com',
         offlineAccess: true,
       });
     }

@@ -1,4 +1,4 @@
-// app/(tabs)/settings.tsx - FIXED WITH SUBSCRIPTION REFRESH
+// app/(tabs)/settings.tsx - UPDATED WITH LANGUAGE CONTEXT
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -25,40 +25,13 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
-
-const LANGUAGES = [
-  { code: 'en', name: 'English', flag: '🇬🇧' },
-  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', flag: '🇫🇷' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'it', name: 'Italian', flag: '🇮🇹' },
-  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
-  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
-  { code: 'hi', name: 'Hindi', flag: '🇮🇳' },
-  { code: 'nl', name: 'Dutch', flag: '🇳🇱' },
-  { code: 'pl', name: 'Polish', flag: '🇵🇱' },
-  { code: 'tr', name: 'Turkish', flag: '🇹🇷' },
-  { code: 'sv', name: 'Swedish', flag: '🇸🇪' },
-  { code: 'no', name: 'Norwegian', flag: '🇳🇴' },
-  { code: 'da', name: 'Danish', flag: '🇩🇰' },
-  { code: 'fi', name: 'Finnish', flag: '🇫🇮' },
-  { code: 'el', name: 'Greek', flag: '🇬🇷' },
-  { code: 'cs', name: 'Czech', flag: '🇨🇿' },
-  { code: 'hu', name: 'Hungarian', flag: '🇭🇺' },
-  { code: 'ro', name: 'Romanian', flag: '🇷🇴' },
-  { code: 'th', name: 'Thai', flag: '🇹🇭' },
-  { code: 'vi', name: 'Vietnamese', flag: '🇻🇳' },
-  { code: 'id', name: 'Indonesian', flag: '🇮🇩' },
-  { code: 'uk', name: 'Ukrainian', flag: '🇺🇦' },
-  { code: 'he', name: 'Hebrew', flag: '🇮🇱' },
-];
+import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext'; // ✅ NEW
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  
+  // ✅ NEW: Use language from context instead of local state
+  const { language, setLanguage } = useLanguage();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<string | null>(null);
@@ -67,7 +40,6 @@ export default function SettingsScreen() {
   const [showEditNameModal, setShowEditNameModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [tempName, setTempName] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState('en');
 
   const { user, signOut, updateUserName } = useAuth();
   const {
@@ -77,7 +49,7 @@ export default function SettingsScreen() {
     isLoadingSubscription,
     purchaseSubscription,
     restorePurchases,
-    refreshSubscriptionStatus,  // ✅ ADDED
+    refreshSubscriptionStatus,
   } = useDreamUsage();
 
   useEffect(() => {
@@ -91,10 +63,7 @@ export default function SettingsScreen() {
           setNotificationsEnabled(JSON.parse(saved));
         }
         
-        const savedLanguage = await AsyncStorage.getItem('language');
-        if (savedLanguage) {
-          setSelectedLanguage(savedLanguage);
-        }
+        // ✅ REMOVED: No need to load language from AsyncStorage, LanguageContext handles it
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -141,8 +110,6 @@ export default function SettingsScreen() {
             shouldSetBadge: true,
           }),
         });
-        
-        // ✅ No alert needed - toggle feedback is enough
       } else {
         setNotificationsEnabled(false);
         await AsyncStorage.setItem('notifications', JSON.stringify(false));
@@ -153,13 +120,12 @@ export default function SettingsScreen() {
     }
   };
 
+  // ✅ UPDATED: Use context's setLanguage which handles AsyncStorage automatically
   const handleLanguageSelect = async (languageCode: string) => {
     try {
-      setSelectedLanguage(languageCode);
-      await AsyncStorage.setItem('language', languageCode);
+      await setLanguage(languageCode); // ✅ This saves to AsyncStorage automatically
       setShowLanguageModal(false);
-      
-      // ✅ No alert needed - visual selection feedback is enough
+      console.log('✅ Language updated to:', languageCode);
     } catch (e) {
       console.error('Failed to save language:', e);
       Alert.alert('Error', 'Failed to update language');
@@ -209,7 +175,6 @@ export default function SettingsScreen() {
     
     await updateUserName(tempName.trim());
     setShowEditNameModal(false);
-    // ✅ No alert needed - modal closing is feedback enough
   };
 
   const handleSignOut = () =>
@@ -229,10 +194,8 @@ export default function SettingsScreen() {
           style: 'destructive', 
           onPress: async () => {
             try {
-              // 🔥 ACCOUNT DELETION LOGIC
               console.log('🗑️ Starting account deletion...');
               
-              // 1. Clear ALL user data from AsyncStorage
               const keysToRemove = [
                 'user',
                 'hasCompletedOnboarding',
@@ -241,21 +204,11 @@ export default function SettingsScreen() {
                 'temp_otp',
                 'temp_otp_email',
                 'temp_otp_expires',
-                // Add any other keys your app uses
               ];
               
               await AsyncStorage.multiRemove(keysToRemove);
               console.log('✅ All user data removed from storage');
               
-              // 2. If you have a backend API, call it here to delete server-side data
-              // Example:
-              // if (user?.id) {
-              //   await fetch(`https://your-api.com/users/${user.id}`, {
-              //     method: 'DELETE',
-              //   });
-              // }
-              
-              // 3. Sign out from Google if they signed in with Google
               try {
                 const { GoogleSignin } = require('@react-native-google-signin/google-signin');
                 if (await GoogleSignin.isSignedIn()) {
@@ -266,10 +219,8 @@ export default function SettingsScreen() {
                 console.log('No Google sign-in to clear');
               }
               
-              // 4. Redirect to welcome screen
               router.replace('/welcome');
               
-              // 5. Show success message
               Alert.alert(
                 'Account Deleted',
                 'Your account and all associated data have been permanently deleted. We\'re sad to see you go!',
@@ -293,7 +244,6 @@ export default function SettingsScreen() {
 
   const handleSignIn = () => router.push('/(auth)/signin');
 
-  // ✅ FIXED FUNCTION WITH REFRESH
   const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
     const productMap: Record<string, string> = { 
       weekly: 'dream_weekly', 
@@ -325,14 +275,11 @@ export default function SettingsScreen() {
     
     console.log('✅ [Settings] Found package:', packageToPurchase.identifier);
     
-    // ⚡ CRITICAL FIX: Close modal IMMEDIATELY for instant UX!
     setShowSubscriptionModal(false);
     
-    // Then process purchase in background
     const success = await purchaseSubscription(packageToPurchase);
     
     if (success) {
-      // ✅ REFRESH SUBSCRIPTION STATUS!
       await refreshSubscriptionStatus();
     }
   };
@@ -341,13 +288,13 @@ export default function SettingsScreen() {
     const resetDate = new Date(dreamUsage.resetDate);
     const now = new Date();
     
-    // ✅ FIX #2: resetDate is already the NEXT reset date - just calculate difference
     const days = Math.ceil((resetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     return days > 0 ? days : 0;
   };
 
+  // ✅ UPDATED: Use SUPPORTED_LANGUAGES from context
   const getCurrentLanguageName = () => {
-    return LANGUAGES.find(l => l.code === selectedLanguage)?.name || 'English';
+    return SUPPORTED_LANGUAGES.find(l => l.code === language)?.name || 'English';
   };
 
   const getDisplayName = () => {
@@ -464,13 +411,11 @@ export default function SettingsScreen() {
               <ActivityIndicator size="small" color="#7278E6" />
             ) : user && subscription ? (
               <>
-                {/* ✅ FIX #3: Plan Name on LEFT */}
                 <View style={styles.planBadge}>
                   <Text style={styles.planBadgeText}>{subscription.name}</Text>
                 </View>
 
                 <View style={styles.usageContainer}>
-                  {/* Dreams Remaining - BIG and CENTERED */}
                   <View style={styles.dreamsRemainingContainer}>
                     <Text style={styles.dreamsRemainingBig}>
                       {dreamUsage.total - dreamUsage.used}
@@ -480,7 +425,6 @@ export default function SettingsScreen() {
                     </Text>
                   </View>
 
-                  {/* Progress Bar */}
                   <View style={styles.progressBar}>
                     <View
                       style={[
@@ -490,7 +434,6 @@ export default function SettingsScreen() {
                     />
                   </View>
 
-                  {/* Reset Info */}
                   {getDaysUntilReset() > 0 && (
                     <Text style={styles.resetText}>
                       Resets in {getDaysUntilReset()} day{getDaysUntilReset() !== 1 ? 's' : ''}
@@ -664,25 +607,26 @@ export default function SettingsScreen() {
               style={styles.languageList}
               showsVerticalScrollIndicator={false}
             >
-              {LANGUAGES.map((lang) => (
+              {/* ✅ UPDATED: Use SUPPORTED_LANGUAGES from context */}
+              {SUPPORTED_LANGUAGES.map((lang) => (
                 <TouchableOpacity
                   key={lang.code}
                   style={[
                     styles.languageItem,
-                    selectedLanguage === lang.code && styles.languageItemSelected
+                    language === lang.code && styles.languageItemSelected
                   ]}
                   onPress={() => handleLanguageSelect(lang.code)}
                 >
                   <View style={styles.languageItemLeft}>
-                    <Text style={styles.languageFlag}>{lang.flag}</Text>
+                    <Text style={styles.languageFlag}>{lang.nativeName.charAt(0)}</Text>
                     <Text style={[
                       styles.languageItemText,
-                      selectedLanguage === lang.code && styles.languageItemTextSelected
+                      language === lang.code && styles.languageItemTextSelected
                     ]}>
                       {lang.name}
                     </Text>
                   </View>
-                  {selectedLanguage === lang.code && (
+                  {language === lang.code && (
                     <Ionicons name="checkmark-circle" size={24} color="#7278E6" />
                   )}
                 </TouchableOpacity>
@@ -720,7 +664,6 @@ function SubscriptionModal({
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} bounces>
-            {/* WEEKLY */}
             <TouchableOpacity
               style={[styles.planCard, currentId === 'dream_weekly' && styles.currentPlan]}
               onPress={() => onSelectPlan('weekly')}
@@ -742,7 +685,6 @@ function SubscriptionModal({
               </View>
             </TouchableOpacity>
 
-            {/* BASIC MONTHLY */}
             <TouchableOpacity
               style={[styles.planCard, currentId === 'dream_basic_monthly' && styles.currentPlan]}
               onPress={() => onSelectPlan('basic')}
@@ -764,7 +706,6 @@ function SubscriptionModal({
               </View>
             </TouchableOpacity>
 
-            {/* PRO MONTHLY */}
             <TouchableOpacity
               style={[styles.planCard, styles.recommendedPlan, currentId === 'dream_pro_monthly' && styles.currentPlan]}
               onPress={() => onSelectPlan('pro')}
@@ -795,7 +736,6 @@ function SubscriptionModal({
               <Text style={styles.restoreModalButtonText}>Restore Purchases</Text>
             </TouchableOpacity>
 
-            {/* Legal Links */}
             <View style={styles.legalLinks}>
               <TouchableOpacity onPress={() => { onClose(); router.push('/terms-of-service'); }}>
                 <Text style={styles.legalLinkText}>Terms of Service</Text>

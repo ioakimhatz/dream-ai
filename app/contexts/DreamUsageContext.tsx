@@ -1,4 +1,4 @@
-// app/contexts/DreamUsageContext.tsx - FIXED WITH syncPurchases()
+// app/contexts/DreamUsageContext.tsx - FIXED: Added refundDream function
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
@@ -31,6 +31,7 @@ interface DreamUsageContextType {
   isLoadingSubscription: boolean;
   canGenerateDream: boolean;
   useDream: () => Promise<boolean>;
+  refundDream: () => Promise<void>; // 🔥 NEW: Refund function for failed generations
   purchaseSubscription: (packageToPurchase: PurchasesPackage) => Promise<boolean>;
   restorePurchases: () => Promise<void>;
   refreshSubscriptionStatus: () => Promise<void>;
@@ -61,7 +62,7 @@ const PLAN_DETAILS = {
     period: 'monthly' as const
   },
   [PRODUCT_IDS.pro]: {
-    name: 'Pro', 
+    name: 'Pro',
     dreams: 5,
     price: '$12.49/month',
     period: 'monthly' as const
@@ -78,25 +79,30 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     resetDate: new Date().toISOString(),
     planId: null
   });
-  
+
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [offerings, setOfferings] = useState<PurchasesOffering | null>(null);
   const [isLoadingSubscription, setIsLoadingSubscription] = useState(true);
 
   useEffect(() => {
     loadOfferings();
-    loadCachedSubscription(); // ✅ Load cached subscription immediately!
+    loadCachedSubscription();
   }, []);
 
   useEffect(() => {
-    if (user) {
-      loginToRevenueCat(user.id);
-      loadDreamUsage();
-      checkSubscriptionStatus();
-    } else {
-      logoutFromRevenueCat();
-      resetUsage();
-    }
+    const initializeUser = async () => {
+      if (user) {
+        // 🔥 FIXED: Wait for login to complete BEFORE checking subscription
+        await loginToRevenueCat(user.id);
+        await loadDreamUsage();
+        await checkSubscriptionStatus();
+      } else {
+        await logoutFromRevenueCat();
+        await resetUsage();
+      }
+    };
+
+    initializeUser();
   }, [user]);
 
   const loadOfferings = async () => {
@@ -113,7 +119,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  // ✅ NEW: Load cached subscription immediately on startup
   const loadCachedSubscription = async () => {
     try {
       const cached = await AsyncStorage.getItem(SUBSCRIPTION_KEY);
@@ -155,8 +160,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   const checkSubscriptionStatus = async () => {
     try {
       setIsLoadingSubscription(true);
-      
-      // ✅ FIXED: Clear cache only ONCE (was 3x)
+
       console.log('🗑️ Clearing RevenueCat cache...');
       try {
         await Purchases.invalidateCustomerInfoCache();
@@ -165,49 +169,40 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.warn('⚠️ Cache invalidation failed:', cacheError);
       }
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 🔥 IMPROVED: Sync first, then check
+
       console.log('🔄 Syncing purchases with Apple...');
       try {
         await Purchases.syncPurchases();
       } catch (syncError) {
         console.warn('⚠️ Sync failed, continuing with cached data:', syncError);
       }
-      
-      // Wait for sync to complete
+
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Then get customer info (should be fresh now!)
+
       console.log('📥 Fetching fresh customer info...');
       const customerInfo = await Purchases.getCustomerInfo();
-      
+
       const activeEntitlements = Object.keys(customerInfo.entitlements.active);
-      
+
       console.log('🔍 [checkSubscriptionStatus] Active entitlements:', activeEntitlements);
       console.log('🔍 [checkSubscriptionStatus] App User ID:', customerInfo.originalAppUserId);
-      
+
       if (activeEntitlements.length > 0) {
-        // 🔥 CRITICAL FIX: When multiple subscriptions are active (sandbox issue),
-        // choose the HIGHEST LEVEL one, not just the first one!
-        
         const entitlementKey = activeEntitlements[0];
         const entitlement = customerInfo.entitlements.active[entitlementKey];
-        
-        // Get ALL active product IDs
-        const allActiveProducts = activeEntitlements.map(key => 
+
+        const allActiveProducts = activeEntitlements.map(key =>
           customerInfo.entitlements.active[key].productIdentifier
         );
-        
+
         console.log('📦 All active products:', allActiveProducts);
-        
-        // 🔥 FIX: Define subscription ranks (higher = better)
+
         const subscriptionRanks: Record<string, number> = {
           'dream_weekly': 1,
           'dream_basic_monthly': 2,
           'dream_pro_monthly': 3
         };
 
-        // Find the highest-ranked subscription
         let highestProduct = allActiveProducts[0];
         let highestRank = subscriptionRanks[highestProduct] || 0;
 
@@ -222,17 +217,15 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
         console.log(`🏆 Highest subscription found: ${highestProduct} (rank ${highestRank})`);
 
-        // Use the highest product
         const productId = highestProduct || entitlement.productIdentifier;
-        
+
         if (highestProduct && highestProduct !== entitlement.productIdentifier) {
           console.log(`⚠️ Multiple subscriptions active! Using ${highestProduct} instead of ${entitlement.productIdentifier}`);
         }
-        
+
         console.log('✅ Active entitlement found:', entitlementKey);
         console.log('🆔 Product ID to use:', productId);
-        
-        // 🔥 FIX: Direct product ID matching (no includes!)
+
         console.log('🔍 Looking for plan details for product:', productId);
         console.log('🔍 Available PLAN_DETAILS keys:', Object.keys(PLAN_DETAILS));
 
@@ -243,10 +236,10 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
             return matches;
           }
         );
-        
+
         if (planDetail) {
           const [planId, details] = planDetail;
-          
+
           const newSubscription: Subscription = {
             id: planId,
             name: details.name,
@@ -255,19 +248,17 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
             period: details.period,
             isActive: true
           };
-          
+
           setSubscription(newSubscription);
           await AsyncStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(newSubscription));
           await updateDreamLimits(planId, details.dreams, details.period);
-          
+
           console.log('✅ Active subscription:', details.name, `(${details.dreams} dreams)`);
         } else {
-          // 🔥 Better error logging
           console.error('❌ No matching plan found for product ID:', productId);
           console.error('   Available plan keys:', Object.keys(PLAN_DETAILS));
           console.error('   PLAN_DETAILS:', JSON.stringify(PLAN_DETAILS, null, 2));
-          
-          // Set to null but keep user informed
+
           setSubscription(null);
           await AsyncStorage.removeItem(SUBSCRIPTION_KEY);
         }
@@ -275,7 +266,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.log('❌ No active subscription found');
         setSubscription(null);
         await AsyncStorage.removeItem(SUBSCRIPTION_KEY);
-        
+
         const freeUsage = {
           used: 0,
           total: 0,
@@ -287,8 +278,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       }
     } catch (error) {
       console.error('❌ Error checking subscription:', error);
-      
-      // 🔥 Try to use cached data as fallback
+
       const cached = await AsyncStorage.getItem(SUBSCRIPTION_KEY);
       if (cached) {
         console.log('ℹ️ Using cached subscription data');
@@ -303,22 +293,20 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     const currentUsage = await loadDreamUsage();
     const now = new Date();
     const resetDate = new Date(currentUsage.resetDate);
-    
+
     let shouldReset = false;
     if (period === 'weekly') {
       const daysDiff = Math.floor((now.getTime() - resetDate.getTime()) / (1000 * 60 * 60 * 24));
       shouldReset = daysDiff >= 7;
     } else if (period === 'monthly') {
-      const monthsDiff = (now.getFullYear() - resetDate.getFullYear()) * 12 + 
-                        (now.getMonth() - resetDate.getMonth());
+      const monthsDiff = (now.getFullYear() - resetDate.getFullYear()) * 12 +
+        (now.getMonth() - resetDate.getMonth());
       shouldReset = monthsDiff >= 1;
     }
 
-    // ⚡ CRITICAL FIX #3: Detect plan changes
     const isPlanChange = currentUsage.planId !== planId && currentUsage.planId !== null;
 
     let newUsage: DreamUsage;
-    // Reset if time period elapsed OR if plan changed
     if (shouldReset || isPlanChange || currentUsage.planId === null) {
       const nextResetDate = new Date();
       if (period === 'weekly') {
@@ -326,14 +314,14 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       } else {
         nextResetDate.setMonth(nextResetDate.getMonth() + 1);
       }
-      
+
       newUsage = {
         used: 0,
         total: dreamCount,
         resetDate: nextResetDate.toISOString(),
         planId
       };
-      
+
       if (isPlanChange) {
         console.log(`🔄 Plan changed from ${currentUsage.planId} to ${planId}! Dreams reset to 0/${dreamCount}`);
       } else {
@@ -364,7 +352,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('❌ Error loading dream usage:', error);
     }
-    
+
     const defaultUsage = {
       used: 0,
       total: 0,
@@ -389,93 +377,121 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   };
 
   const useDream = async (): Promise<boolean> => {
-    // Check if we need to reset weekly
+    const currentUsage = await loadDreamUsage();
+
+    console.log('🎬 Attempting to use dream. Current:', currentUsage);
+
+    let usageToCheck = currentUsage;
+
     if (subscription?.period === 'weekly') {
       const now = new Date();
-      const resetDate = new Date(dreamUsage.resetDate);
-      const daysDiff = Math.floor((now.getTime() - resetDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (daysDiff >= 7) {
+      const resetDate = new Date(currentUsage.resetDate);
+
+      if (now >= resetDate) {
         const newResetDate = new Date();
         newResetDate.setDate(newResetDate.getDate() + 7);
-        
+
         const resetUsage = {
           used: 0,
           total: subscription.dreams,
           resetDate: newResetDate.toISOString(),
           planId: subscription.id
         };
-        
+
+        usageToCheck = resetUsage;
+
         setDreamUsage(resetUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(resetUsage));
-        console.log('✅ Weekly dreams reset!');
+        console.log('✅ Weekly dreams reset! New usage:', resetUsage);
       }
-    } 
-    // Check if we need to reset monthly
+    }
     else if (subscription?.period === 'monthly') {
       const now = new Date();
-      const resetDate = new Date(dreamUsage.resetDate);
-      
+      const resetDate = new Date(currentUsage.resetDate);
+
       if (now >= resetDate) {
         const newResetDate = new Date();
         newResetDate.setMonth(newResetDate.getMonth() + 1);
-        
+
         const resetUsage = {
           used: 0,
           total: subscription.dreams,
           resetDate: newResetDate.toISOString(),
           planId: subscription.id
         };
-        
+
+        usageToCheck = resetUsage;
+
         setDreamUsage(resetUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(resetUsage));
-        console.log('✅ Monthly dreams reset!');
+        console.log('✅ Monthly dreams reset! New usage:', resetUsage);
       }
     }
-    
-    // Check if user has dreams available
-    if (dreamUsage.used >= dreamUsage.total) {
+
+    if (usageToCheck.used >= usageToCheck.total) {
+      console.log(`❌ Dream limit reached: ${usageToCheck.used}/${usageToCheck.total}`);
       Alert.alert(
         'Dream Limit Reached',
-        subscription 
-          ? `You've used all ${dreamUsage.total} dreams for this period. Next reset: ${new Date(dreamUsage.resetDate).toLocaleDateString()}`
+        subscription
+          ? `You've used all ${usageToCheck.total} dreams for this period. Next reset: ${new Date(usageToCheck.resetDate).toLocaleDateString()}`
           : 'Subscribe to generate amazing dream videos!',
         [{ text: 'OK', style: 'cancel' }]
       );
       return false;
     }
-    
+
     const newUsage = {
-      ...dreamUsage,
-      used: dreamUsage.used + 1
+      ...usageToCheck,
+      used: usageToCheck.used + 1
     };
-    
+
     setDreamUsage(newUsage);
     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
-    
-    console.log(`🎬 Dream used: ${newUsage.used}/${newUsage.total}`);
+
+    console.log(`✅ Dream used: ${newUsage.used}/${newUsage.total}`);
     return true;
+  };
+
+  // 🔥 NEW: Refund a dream when generation fails
+  const refundDream = async (): Promise<void> => {
+    try {
+      const currentUsage = await loadDreamUsage();
+
+      // Only refund if we actually used a dream
+      if (currentUsage.used > 0) {
+        const refundedUsage = {
+          ...currentUsage,
+          used: currentUsage.used - 1
+        };
+
+        setDreamUsage(refundedUsage);
+        await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(refundedUsage));
+
+        console.log(`✅ Dream refunded: ${refundedUsage.used}/${refundedUsage.total}`);
+      } else {
+        console.log('⚠️ No dreams to refund (usage is already 0)');
+      }
+    } catch (error) {
+      console.error('❌ Error refunding dream:', error);
+    }
   };
 
   const purchaseSubscription = async (packageToPurchase: PurchasesPackage): Promise<boolean> => {
     try {
-      // 🔥 PREVENT DOUBLE-PURCHASE
       if (isLoadingSubscription) {
         console.log('⚠️ Purchase already in progress, ignoring duplicate request');
         return false;
       }
 
-      setIsLoadingSubscription(true);
-
       console.log('💳 Attempting to purchase:', packageToPurchase.identifier);
       console.log('💳 Package product ID:', packageToPurchase.product.identifier);
-      
-      // Let RevenueCat handle the upgrade naturally - don't clear old subscription!
+
       const { customerInfo } = await Purchases.purchasePackage(packageToPurchase);
 
+      setIsLoadingSubscription(true);
+
       console.log('🔄 Purchase completed, syncing with Apple...');
-      
-      // ✅ FIXED: Clear cache only ONCE (was 3x)
+
       try {
         await Purchases.invalidateCustomerInfoCache();
         console.log('🗑️ Cache cleared');
@@ -483,42 +499,36 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.warn('⚠️ Cache clear failed:', e);
       }
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Simpler sync approach - what worked before!
+
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           console.log(`🔄 Sync attempt ${attempt}/3...`);
-          
+
           await Purchases.syncPurchases();
-          
-          // Wait for Apple servers to process
+
           await new Promise(resolve => setTimeout(resolve, 3000));
-          
+
           const freshCustomerInfo = await Purchases.getCustomerInfo();
           const activeEntitlements = Object.keys(freshCustomerInfo.entitlements.active);
-          
+
           console.log(`🔍 Active entitlements (attempt ${attempt}):`, activeEntitlements);
 
           if (activeEntitlements.length > 0) {
-            // 🔥 CRITICAL FIX: Choose highest-level subscription when multiple active
             const entitlementKey = activeEntitlements[0];
             const entitlement = freshCustomerInfo.entitlements.active[entitlementKey];
-            
-            // Get ALL active product IDs
-            const allActiveProducts = activeEntitlements.map(key => 
+
+            const allActiveProducts = activeEntitlements.map(key =>
               freshCustomerInfo.entitlements.active[key].productIdentifier
             );
-            
+
             console.log('📦 All active products:', allActiveProducts);
-            
-            // 🔥 FIX: Define subscription ranks (higher = better)
+
             const subscriptionRanks: Record<string, number> = {
               'dream_weekly': 1,
               'dream_basic_monthly': 2,
               'dream_pro_monthly': 3
             };
 
-            // Find the highest-ranked subscription
             let highestProduct = allActiveProducts[0];
             let highestRank = subscriptionRanks[highestProduct] || 0;
 
@@ -533,16 +543,14 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
             console.log(`🏆 Highest subscription found: ${highestProduct} (rank ${highestRank})`);
 
-            // Use the highest product
             const productId = highestProduct || entitlement.productIdentifier;
-            
+
             if (highestProduct && highestProduct !== entitlement.productIdentifier) {
               console.log(`⚠️ Multiple subscriptions active! Using ${highestProduct} instead of ${entitlement.productIdentifier}`);
             }
 
             console.log('🆔 Product ID from RevenueCat:', productId);
 
-            // 🔥 FIX: Direct product ID matching (no includes!)
             console.log('🔍 Looking for plan details for product:', productId);
             console.log('🔍 Available PLAN_DETAILS keys:', Object.keys(PLAN_DETAILS));
 
@@ -571,9 +579,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
               await updateDreamLimits(planId, details.dreams, details.period);
 
               console.log('✅ Subscription activated:', details.name, `(${details.dreams} dreams)`);
-              
-              // ✅ FIXED: Removed recursive calls that were causing 3x generation
-              // Just return success - subscription is already active!
+
               return true;
             }
           }
@@ -583,7 +589,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         }
       }
 
-      // If we get here, no entitlements found after 3 attempts
       console.warn('⚠️ Purchase completed but no active entitlements found after 3 attempts');
       Alert.alert(
         'Purchase Processed',
@@ -596,16 +601,15 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.log('ℹ️ User cancelled purchase');
       } else {
         console.error('❌ Purchase error:', error);
-        
-        // 🔥 BETTER ERROR MESSAGES
+
         let errorMessage = 'Unable to complete purchase. Please try again.';
-        
+
         if (error.message?.includes('App Store')) {
           errorMessage = 'Connection to App Store failed. Please check your internet and try again.';
         } else if (error.message?.includes('already in progress')) {
           errorMessage = 'A purchase is already in progress. Please wait a moment.';
         }
-        
+
         Alert.alert('Purchase Failed', errorMessage);
       }
       return false;
@@ -618,27 +622,24 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     try {
       setIsLoadingSubscription(true);
       console.log('🔄 Restoring purchases...');
-      
-      // 🔥 IMPROVED: Try multiple times with delays
+
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           console.log(`🔄 Restore attempt ${attempt}/3...`);
-          
+
           await Purchases.restorePurchases();
           await Purchases.syncPurchases();
-          
-          // Wait for Apple servers
+
           await new Promise(resolve => setTimeout(resolve, 2000));
-          
+
           const freshCustomerInfo = await Purchases.getCustomerInfo();
           const activeEntitlements = Object.keys(freshCustomerInfo.entitlements.active);
-          
+
           console.log(`🔍 Active entitlements after restore (attempt ${attempt}):`, activeEntitlements);
-          
+
           if (activeEntitlements.length > 0) {
-            // 🔥 FORCE FULL REFRESH
             await checkSubscriptionStatus();
-            
+
             Alert.alert('Success! 🎉', 'Your purchases have been restored.');
             return;
           }
@@ -647,16 +648,15 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
           if (attempt === 3) throw restoreError;
         }
       }
-      
-      // No purchases found after 3 attempts
+
       Alert.alert(
-        'No Purchases Found', 
+        'No Purchases Found',
         'No previous purchases were found for this account.\n\nIf you just made a purchase, please wait a minute and try again.'
       );
     } catch (error) {
       console.error('❌ Restore error:', error);
       Alert.alert(
-        'Restore Failed', 
+        'Restore Failed',
         'Unable to restore purchases. Please check your internet connection and try again.'
       );
     } finally {
@@ -680,6 +680,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         isLoadingSubscription,
         canGenerateDream,
         useDream,
+        refundDream, // 🔥 NEW: Export refund function
         purchaseSubscription,
         restorePurchases,
         refreshSubscriptionStatus

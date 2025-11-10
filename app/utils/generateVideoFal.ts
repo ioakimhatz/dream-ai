@@ -1,14 +1,14 @@
-// app/utils/generateVideoFal.ts - DREAM AI CINEMA ENGINE (Hailuo 02, identity-aware)
+// app/utils/generateVideoFal.ts - HYBRID: Smart cleaning + Natural variations
 
 import * as FileSystem from 'expo-file-system';
-import { stitchNative } from './nativeStitch';                // native-first (stubbed to force fallback)
-import { stitchWithCloudinary } from './cloudinaryStitch';    // cloud fallback
+import { stitchNative } from './nativeStitch';
+import { stitchWithCloudinary } from './cloudinaryStitch';
 import { getOrCreateIdentityImageUrl } from './identityLock';
+import { processPromptForGeneration } from './smartPromptProcessor';
 
 type Engine = 'hailuo-02';
 const ENGINE: Engine = 'hailuo-02';
 
-// Multiple API keys for parallel generation (or fall back to single)
 const FAL_API_KEYS = [
   process.env.EXPO_PUBLIC_FAL_API_KEY_1,
   process.env.EXPO_PUBLIC_FAL_API_KEY_2,
@@ -54,9 +54,9 @@ async function generateSingleClip(
 
   if (identityDataUrl) {
     if (useImageToVideo) {
-      body.image_url = identityDataUrl; // Hailuo accepts data URLs
+      body.image_url = identityDataUrl;
     } else {
-      body.reference_images = [identityDataUrl]; // harmless if engine ignores
+      body.reference_images = [identityDataUrl];
       body.identity_hint =
         'Keep the same main person (face, hair, body build) consistent across shots.';
     }
@@ -104,6 +104,20 @@ export async function generate3ClipDreamCinemaParallel(
 }> {
   const start = Date.now();
 
+  // 🔥 STEP 1: Smart cleaning (removes explicit, celebrities)
+  onProgress?.(0, 3, 'Dream AI is processing your story...');
+  console.log('🧠 Smart cleaning prompt...');
+  
+  const processed = await processPromptForGeneration(fullPrompt);
+  
+  if (processed.isBlocked) {
+    console.log(`🚫 Prompt blocked: ${processed.blockReason}`);
+    throw new Error(`Your dream contains inappropriate content. Please try a different dream!`);
+  }
+  
+  const cleanPrompt = processed.cleanPrompt || fullPrompt;
+  console.log(`✅ Clean prompt: "${cleanPrompt}"`);
+
   // Prepare identity as a DATA URL once
   let identityDataUrl: string | undefined;
   if (localFaceImageUri) {
@@ -115,12 +129,14 @@ export async function generate3ClipDreamCinemaParallel(
     }
   }
 
-  // 1) Split into acts
-  onProgress?.(0, 3, 'Dream AI is analyzing your story...');
-  const acts = await splitPromptInto3Acts(fullPrompt, !!identityDataUrl);
-  onProgress?.(0, 3, 'Dream AI is creating your scenes...');
+  // 🔥 STEP 2: Create natural variations using OpenAI (OLD SYSTEM RESTORED!)
+  onProgress?.(0, 3, 'Dream AI is creating scene variations...');
+  const acts = await splitPromptInto3NaturalActs(cleanPrompt, !!identityDataUrl);
+  console.log('🎬 Natural variations:', acts);
+  
+  onProgress?.(0, 3, 'Dream AI is generating your scenes...');
 
-  // 2) Generate 3 clips in parallel
+  // 🔥 STEP 3: Generate 3 clips in parallel
   const promises = acts.map((act, idx) =>
     generateSingleClip(act, idx, identityDataUrl, idx).then((r) => {
       onProgress?.(idx + 1, 3, `Dream sequence ${idx + 1}/3 ready`);
@@ -132,11 +148,11 @@ export async function generate3ClipDreamCinemaParallel(
   const videoUrls = results.map((r) => r.videoUrl);
   const coverUrl = results[0]?.coverUrl ?? null;
 
-  // 3) Stitch (native → cloud)
+  // 🔥 STEP 4: Stitch (native → cloud)
   onProgress?.(3, 3, 'Dream AI is finalizing your cinema...');
   let stitchedVideoUrl = videoUrls[0];
   try {
-    stitchedVideoUrl = await stitchNative(videoUrls); // will throw → cloud fallback
+    stitchedVideoUrl = await stitchNative(videoUrls);
     console.log('✅ [NATIVE] stitched');
   } catch {
     console.warn('Native stitch failed, using Cloudinary');
@@ -154,24 +170,76 @@ export async function generate3ClipDreamCinemaParallel(
   };
 }
 
-// ===== Splitter (OpenAI with fallback) =====
-
-async function splitPromptInto3Acts(fullPrompt: string, hasFace: boolean): Promise<string[]> {
+/**
+ * 🎯 RESTORED: OLD VARIATION SYSTEM
+ * Uses OpenAI to create natural, cinematic variations
+ * Falls back to simple descriptive variations if OpenAI unavailable
+ */
+async function splitPromptInto3NaturalActs(cleanPrompt: string, hasFace: boolean): Promise<string[]> {
   const key = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  
+  // Fallback: Simple natural variations (no rigid templates!)
   if (!key) {
+    console.log('⚠️ No OpenAI key, using simple variations');
     return [
-      `${fullPrompt}. OPENING SCENE: Wide establishing cinematic shot introducing the environment and character with atmospheric lighting and mood.`,
-      `${fullPrompt}. MAIN ACTION: Medium shot capturing the primary movement and story development with smooth camera work.`,
-      `${fullPrompt}. CLIMAX MOMENT: Close-up emotional conclusion showing character reaction with dramatic depth of field and lighting.`,
+      `${cleanPrompt}, wide establishing shot`,
+      `${cleanPrompt}, medium shot with smooth motion`,
+      `${cleanPrompt}, close-up emotional moment`,
     ];
   }
 
   try {
-    const system = `Create 3 cinematic prompts for 6-second clips with continuity.
-Include camera motion, lighting, environment, and realistic movement.
-${hasFace ? 'Keep the SAME main person recognizable across acts.' : ''}
+    const system = `You are a cinematic storytelling expert. Create 3 natural video prompts for 6-second clips.
 
-Return JSON: {"acts": ["act1", "act2", "act3"]}`;
+CRITICAL RULES:
+- Keep it SIMPLE and NATURAL (like describing a scene to a friend)
+- NO technical terms (no "photorealistic", "4k", "cinematic", etc.)
+- NO instructions (no "NOT cartoon", "NOT animated", etc.)
+- Just describe WHAT happens in natural language
+- Make each clip unique but tell one flowing story
+- Each prompt should be 10-20 words maximum
+${hasFace ? '- Keep the same main person consistent across all 3 clips' : ''}
+
+INPUT: "${cleanPrompt}"
+
+Create 3 simple, natural variations that tell a story:
+- Clip 1: Opening/establishing scene
+- Clip 2: Main action/movement  
+- Clip 3: Emotional conclusion/reaction
+
+Return JSON: {"acts": ["act1", "act2", "act3"]}
+
+EXAMPLES:
+
+Input: "person riding motorcycle with woman through forest"
+Good Output:
+{
+  "acts": [
+    "person and woman starting motorcycle ride at forest entrance",
+    "person riding motorcycle with woman along winding forest path",
+    "person and woman arriving at forest clearing, smiling"
+  ]
+}
+
+Input: "person kissing woman in park"
+Good Output:
+{
+  "acts": [
+    "person and woman walking together in park",
+    "person and woman sharing kiss under tree in park",
+    "person and woman smiling after kiss in park"
+  ]
+}
+
+Input: "two people playing with dog in park"
+Good Output:
+{
+  "acts": [
+    "dog running to greet two people in park",
+    "two people throwing ball for dog in open field",
+    "dog jumping happily with two people in park"
+  ]
+}`;
 
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -181,24 +249,37 @@ Return JSON: {"acts": ["act1", "act2", "act3"]}`;
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
-          { role: 'user', content: fullPrompt },
+          { role: 'user', content: cleanPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 700,
+        max_tokens: 400,
       }),
     });
 
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) {
+      console.warn('OpenAI failed, using fallback');
+      throw new Error(await r.text());
+    }
+    
     const data = await r.json();
     const content = data.choices?.[0]?.message?.content || '{}';
     const parsed = JSON.parse(content);
-    if (Array.isArray(parsed.acts) && parsed.acts.length === 3) return parsed.acts;
-    throw new Error('bad format');
-  } catch {
+    
+    if (Array.isArray(parsed.acts) && parsed.acts.length === 3) {
+      console.log('✅ OpenAI generated natural variations');
+      return parsed.acts;
+    }
+    
+    throw new Error('Invalid format from OpenAI');
+    
+  } catch (error) {
+    console.warn('OpenAI variation failed, using fallback:', error);
+    
+    // Fallback: Simple natural variations
     return [
-      `${fullPrompt} - ESTABLISHING: Wide cinematic shot introducing the full dream scene with professional lighting and atmosphere.`,
-      `${fullPrompt} - DEVELOPMENT: Medium shot capturing dynamic dream action with smooth camera movement and character focus.`,
-      `${fullPrompt} - RESOLUTION: Close-up emotional dream moment with dramatic lighting and shallow depth of field.`,
+      `${cleanPrompt}, wide establishing shot`,
+      `${cleanPrompt}, medium shot with smooth motion`,
+      `${cleanPrompt}, close-up emotional moment`,
     ];
   }
 }

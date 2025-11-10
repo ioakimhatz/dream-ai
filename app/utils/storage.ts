@@ -1,4 +1,4 @@
-// utils/storage.ts - COMPLETE VERSION WITH ALL FUNCTIONS
+// utils/storage.ts - FIXED WITH thumbnailUrl
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Dream item interface (for library.tsx)
@@ -6,10 +6,11 @@ export interface DreamItem {
   id: string;
   prompt: string;
   videoUrl?: string | null;
+  thumbnailUrl?: string | null; // 🔥 ADD THIS LINE!
   coverUrl?: string | null;
   createdAt: number;
   duration?: number;
-  clips?: string[] | null; // Added clips property for video segments
+  clips?: string[] | null;
 }
 
 // User interface
@@ -144,10 +145,11 @@ export const createMockDream = (prompt: string): DreamItem => ({
   id: Date.now().toString(),
   prompt,
   createdAt: Date.now(),
-  duration: 8, // 8 seconds default
-  coverUrl: null, // Will be set when video is generated
-  videoUrl: null, // Will be set when video is generated
-  clips: null, // Will be set when video segments are generated
+  duration: 8,
+  coverUrl: null,
+  thumbnailUrl: null, // 🔥 ADD THIS!
+  videoUrl: null,
+  clips: null,
 });
 
 // Clear all data
@@ -197,7 +199,7 @@ export const SUPPORTED_LANGUAGES = [
   'Chinese (Simplified)', 'Chinese (Traditional)'
 ];
 
-// Export for backward compatibility (if needed)
+// Export for backward compatibility
 export default {
   saveDream,
   getDreams,
