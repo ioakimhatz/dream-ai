@@ -1,5 +1,6 @@
-// app/(tabs)/index.tsx - WITH VIEW IN LIBRARY BUTTON
+// app/(tabs)/index.tsx - FIXED: Loading screen issue
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -253,6 +254,8 @@ export default function HomeScreen() {
   const [generationStep, setGenerationStep] = useState('');
   const [videoKey, setVideoKey] = useState(0);
   const [isFocused, setIsFocused] = useState(true);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [completedDreamId, setCompletedDreamId] = useState<string | null>(null);
 
   const waveAnimations = useRef([
     new Animated.Value(0.3),
@@ -305,11 +308,76 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         if (recording) {
           console.log('📱 App went to background, stopping recording...');
           stopRecording();
+        }
+      } else if (nextAppState === 'active') {
+        console.log('📱 App came to foreground, checking for completed jobs...');
+
+        if (activeJobId && isGenerating) {
+          console.log(`🔍 Checking status of job ${activeJobId}...`);
+
+          try {
+            const { getDreamJob } = await import('../services/firestoreService');
+            const job = await getDreamJob(activeJobId);
+
+            if (job && job.status === 'completed' && job.videoUrl) {
+              console.log('✅ Job completed while app was in background!');
+
+              setGenerationStep('Finalizing video...');
+              setGenerationProgress(95);
+
+              console.log('⏰ Waiting 20 seconds for Cloudinary splice to process...');
+              await new Promise(resolve => setTimeout(resolve, 20000));
+
+              console.log('✅ Video should be ready now, preparing to display...');
+              setGenerationStep('Loading video...');
+              setGenerationProgress(98);
+
+              setFinalVideoUri(job.videoUrl);
+              setCoverImage(job.thumbnailUrl ?? null);
+              setVideoKey(prev => prev + 1);
+              setActiveJobId(null);
+
+              const dreamId = uuid();
+              setCompletedDreamId(dreamId);
+              saveDream({
+                id: dreamId,
+                createdAt: Date.now(),
+                prompt: transcript,
+                thumbnailUrl: job.thumbnailUrl ?? null,
+                videoUrl: job.videoUrl,
+                clips: undefined,
+                duration: 15,
+              });
+
+              sendVideoReadyNotification(job.videoUrl);
+              Alert.alert('Dream Created!', 'Your dream cinema is ready!');
+            } else if (job && job.status === 'failed') {
+              console.error('❌ Job failed while app was in background');
+              setIsGenerating(false);
+              setActiveJobId(null);
+
+              try {
+                refundDream();
+              } catch (refundError) {
+                console.error('Failed to refund dream:', refundError);
+              }
+
+              Alert.alert(
+                'Generation Failed - Dream Restored',
+                job.error || 'Failed to generate dream cinema. Please try again.',
+                [{ text: 'OK' }]
+              );
+
+              sendVideoFailedNotification();
+            }
+          } catch (error) {
+            console.error('❌ Failed to check job status:', error);
+          }
         }
       }
     });
@@ -317,7 +385,7 @@ export default function HomeScreen() {
     return () => {
       subscription.remove();
     };
-  }, [recording]);
+  }, [recording, activeJobId, isGenerating, transcript]);
 
   useEffect(() => {
     return () => {
@@ -536,6 +604,7 @@ export default function HomeScreen() {
       });
 
       console.log('✅ Dream job created:', jobId);
+      setActiveJobId(jobId);
       setGenerationStep('Job created! Processing on server...');
 
       const unsubscribe = subscribeToJob(
@@ -556,19 +625,21 @@ export default function HomeScreen() {
             console.log('⏰ Waiting 20 seconds for Cloudinary splice to process...');
             await new Promise(resolve => setTimeout(resolve, 20000));
 
-            console.log('✅ Video should be ready now, displaying...');
+            console.log('✅ Video should be ready now, preparing to display...');
+            setGenerationStep('Loading video...');
+            setGenerationProgress(98);
 
             setFinalVideoUri(job.videoUrl);
             setCoverImage(job.thumbnailUrl ?? null);
             setVideoKey(prev => prev + 1);
-            setIsGenerating(false);
 
-            // 🔥 FIXED: Save with thumbnailUrl instead of coverUrl
+            const dreamId = uuid();
+            setCompletedDreamId(dreamId);
             saveDream({
-              id: uuid(),
+              id: dreamId,
               createdAt: Date.now(),
               prompt: transcript,
-              thumbnailUrl: job.thumbnailUrl ?? null,  // ✅ CORRECT FIELD
+              thumbnailUrl: job.thumbnailUrl ?? null,
               videoUrl: job.videoUrl,
               clips: undefined,
               duration: 15,
@@ -577,6 +648,7 @@ export default function HomeScreen() {
             sendVideoReadyNotification(job.videoUrl);
             Alert.alert('Dream Created!', 'Your dream cinema is ready!');
 
+            setActiveJobId(null);
             unsubscribe();
             generationLockRef.current = false;
           }
@@ -599,6 +671,7 @@ export default function HomeScreen() {
 
             sendVideoFailedNotification();
 
+            setActiveJobId(null);
             unsubscribe();
             generationLockRef.current = false;
           }
@@ -635,7 +708,7 @@ export default function HomeScreen() {
         [{ text: 'OK' }]
       );
     }
-  }, [transcript, user, selectedImages, refundDream, saveDream, sendVideoReadyNotification, sendVideoFailedNotification]);
+  }, [transcript, user, selectedImages, refundDream]);
 
   const handleGenerateDream = async () => {
     if (isGenerating) {
@@ -846,7 +919,65 @@ export default function HomeScreen() {
             <View>
               <Text style={styles.generatedPreview}>Generated video preview</Text>
 
-              {isGenerating ? (
+              {/* 🔥 FIXED: Render video FIRST, then show loading overlay if still generating */}
+              {finalVideoUri ? (
+                <View style={styles.previewVideoContainer}>
+                  {(isVideoLoading || isGenerating) && (
+                    <View style={styles.videoLoadingOverlay}>
+                      <ActivityIndicator size="large" color={DREAM_PURPLE} />
+                      <Text style={styles.videoLoadingText}>
+                        {generationStep || 'Loading video...'}
+                      </Text>
+                      {isGenerating && generationProgress > 0 && (
+                        <View style={styles.progressContainerOverlay}>
+                          <View style={styles.progressBar}>
+                            <View style={[styles.progressFill, { width: `${generationProgress}%` }]} />
+                          </View>
+                          <Text style={styles.progressTextOverlay}>{Math.round(generationProgress)}%</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                  <Video
+                    key={videoKey}
+                    source={{ uri: finalVideoUri }}
+                    style={styles.videoPlayer}
+                    useNativeControls={true}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay={true}
+                    isLooping
+                    onLoadStart={() => {
+                      console.log('📥 Video loading started...');
+                      setIsVideoLoading(true);
+                    }}
+                    onLoad={() => {
+                      console.log('✅ Video loaded successfully!');
+                      setIsVideoLoading(false);
+                      setIsGenerating(false); // 🔥 CRITICAL: Hide loading screen
+                    }}
+                    onError={(error) => {
+                      console.error('❌ Video error:', error);
+                      setIsVideoLoading(false);
+                      setIsGenerating(false); // 🔥 CRITICAL: Hide loading screen on error
+                      Alert.alert('Video Error', 'Failed to load video');
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.viewInLibraryButton}
+                    onPress={() => {
+                      console.log('📚 View in Library pressed, navigating with dreamId:', completedDreamId);
+                      if (completedDreamId) {
+                        router.push(`/(tabs)/library?dreamId=${completedDreamId}`);
+                      } else {
+                        router.push('/(tabs)/library');
+                      }
+                    }}
+                  >
+                    <Text style={styles.viewInLibraryText}>View in Library</Text>
+                    <Ionicons name="arrow-forward-outline" size={18} color="#7C86FF" style={{ marginLeft: 6 }} />
+                  </TouchableOpacity>
+                </View>
+              ) : isGenerating ? (
                 <View style={styles.previewWrapper}>
                   <Image source={require('../../assets/images/dream-preview.png')} style={[styles.previewImage, { opacity: 0.5 }]} blurRadius={8} />
                   <ActivityIndicator size="large" color={DREAM_PURPLE} style={styles.spinner} />
@@ -865,47 +996,6 @@ export default function HomeScreen() {
                     }}
                     prompt={transcript}
                   />
-                </View>
-              ) : finalVideoUri ? (
-                <View style={styles.previewVideoContainer}>
-                  {isVideoLoading && (
-                    <View style={styles.videoLoadingOverlay}>
-                      <ActivityIndicator size="large" color={DREAM_PURPLE} />
-                      <Text style={styles.videoLoadingText}>Loading video...</Text>
-                    </View>
-                  )}
-                  <Video
-                    key={videoKey}
-                    source={{ uri: finalVideoUri }}
-                    style={styles.videoPlayer}
-                    useNativeControls={true}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={true}
-                    isLooping
-                    onLoadStart={() => {
-                      console.log('📥 Video loading started...');
-                      setIsVideoLoading(true);
-                    }}
-                    onLoad={() => {
-                      console.log('✅ Video loaded successfully!');
-                      setIsVideoLoading(false);
-                    }}
-                    onError={(error) => {
-                      console.error('❌ Video error:', error);
-                      setIsVideoLoading(false);
-                      Alert.alert('Video Error', 'Failed to load video: ' + JSON.stringify(error));
-                    }}
-                  />
-                  {/* 🔥 CHANGED: Replay → View in Library */}
-                  <TouchableOpacity
-                    style={styles.replayButton}
-                    onPress={() => {
-                      console.log('📚 View in Library pressed, navigating...');
-                      router.push('/(tabs)/library');
-                    }}
-                  >
-                    <Text style={styles.replayButtonText}>📚 View in Library</Text>
-                  </TouchableOpacity>
                 </View>
               ) : coverImage ? (
                 <Image source={{ uri: coverImage }} style={styles.previewImage} />
@@ -968,11 +1058,6 @@ const styles = StyleSheet.create({
   addImageIcon: { fontSize: 24, color: DREAM_PURPLE, fontWeight: 'bold', marginBottom: 2 },
   addImageText: { fontSize: 10, color: DREAM_PURPLE, fontWeight: '600', textAlign: 'center' },
 
-  usageIndicator: { backgroundColor: 'rgba(114,120,230,0.1)', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(114,120,230,0.3)' },
-  usageText: { color: DREAM_PURPLE, fontSize: 14, fontWeight: '600' },
-  upgradeHint: { backgroundColor: DREAM_PURPLE, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  upgradeHintText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-
   generateBtn: { backgroundColor: DREAM_PURPLE, borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 16, alignSelf: 'stretch' },
   generateBtnDisabled: { backgroundColor: '#E5E7EB' },
   generateBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 18, textAlign: 'center' },
@@ -998,7 +1083,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10
@@ -1006,10 +1091,37 @@ const styles = StyleSheet.create({
   videoLoadingText: {
     color: '#fff',
     marginTop: 10,
-    fontSize: 14
+    fontSize: 16,
+    fontWeight: '600',
   },
-  replayButton: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(114,120,230,0.9)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  replayButtonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  progressContainerOverlay: {
+    marginTop: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  progressTextOverlay: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  viewInLibraryButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  viewInLibraryText: { color: '#7C86FF', fontSize: 14, fontWeight: '700' },
 
   progressContainer: { position: 'absolute', top: '65%', width: '80%', alignItems: 'center' },
   progressBar: { width: '100%', height: 8, backgroundColor: 'rgba(114,120,230,0.3)', borderRadius: 4, overflow: 'hidden' },

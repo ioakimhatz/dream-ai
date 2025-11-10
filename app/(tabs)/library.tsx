@@ -1,6 +1,7 @@
 // app/(tabs)/library.tsx - WITH AUTO-PLAY & LOOP
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams } from 'expo-router';
 import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library';
@@ -10,6 +11,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  AppState,
   Dimensions,
   FlatList,
   Image,
@@ -472,6 +474,10 @@ export default function LibraryScreen() {
   const [playerVisible, setPlayerVisible] = useState(false);
   const insets = useSafeAreaInsets();
 
+  // 🔥 NEW: Get dreamId from route params
+  const params = useLocalSearchParams();
+  const dreamIdParam = params.dreamId as string | undefined;
+
   const load = useCallback(async () => {
     try {
       const list = await getDreams();
@@ -486,6 +492,35 @@ export default function LibraryScreen() {
       load();
     }, [load])
   );
+
+  // 🔥 NEW: Auto-open specific dream when navigating from home with dreamId
+  useEffect(() => {
+    if (dreamIdParam && items.length > 0) {
+      console.log('📚 Looking for dream with ID:', dreamIdParam);
+      const dream = items.find(d => d.id === dreamIdParam);
+      if (dream) {
+        console.log('✅ Found dream, opening modal...');
+        setSelectedDream(dream);
+        setPlayerVisible(true);
+      } else {
+        console.log('⚠️ Dream not found with ID:', dreamIdParam);
+      }
+    }
+  }, [dreamIdParam, items]);
+
+  // 🔥 NEW: Auto-refresh library when app comes to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        console.log('📱 Library: App came to foreground, refreshing dreams...');
+        await load();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

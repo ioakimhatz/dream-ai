@@ -286,7 +286,10 @@ export async function generate3ClipKlingParallel(
   }
   
   let localClips = results.map((r) => r.localUri);
-  const coverUrl = results[0]?.coverUrl ?? null;
+
+  // 🔥 FIX: Use first scene image as thumbnail instead of extracting from video
+  const coverUrl = sceneImages[0] || null;
+  console.log(`🖼️ Using first scene image as thumbnail: ${coverUrl}`);
 
   console.log("✅ All 3 Kling videos generated");
 

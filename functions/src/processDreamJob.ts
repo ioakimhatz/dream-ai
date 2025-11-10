@@ -1,6 +1,7 @@
 // functions/src/processDreamJob.ts - WITH THUMBNAIL FROM SCENE IMAGE
 import * as admin from 'firebase-admin';
 import { generateDreamVideo } from './utils/generateDreamVideo';
+import { sendVideoReadyNotification, sendVideoFailedNotification } from './utils/sendNotification';
 
 export async function processDreamJob(
   jobId: string,
@@ -61,6 +62,14 @@ export async function processDreamJob(
 
     console.log(`✅ Job ${jobId} completed!`);
 
+    // 🔥 NEW: Send FCM push notification to user
+    console.log(`📱 Sending push notification to user ${jobData.userId}...`);
+    await sendVideoReadyNotification(
+      jobData.userId,
+      result.videoUrls[0],
+      jobId
+    );
+
   } catch (error: any) {
     console.error(`❌ Error:`, error);
 
@@ -81,6 +90,14 @@ export async function processDreamJob(
       updatedAt: Date.now(),
       metadata,
     });
+
+    // 🔥 NEW: Send FCM push notification to user about failure
+    console.log(`📱 Sending failure notification to user ${jobData.userId}...`);
+    await sendVideoFailedNotification(
+      jobData.userId,
+      jobId,
+      error.message || 'Generation failed'
+    );
 
     throw error;
   }
