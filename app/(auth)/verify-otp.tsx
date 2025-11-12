@@ -1,4 +1,4 @@
-// app/(auth)/verify-otp.tsx - CLEAN PRODUCTION VERSION
+// app/(auth)/verify-otp.tsx - FIXED: No duplicate alerts
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -19,7 +19,7 @@ export default function VerifyOTPScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const inputs = useRef<TextInput[]>([]);
-  
+
   const { verifyOTP, resendOTP, tempEmail } = useAuth();
 
   useEffect(() => {
@@ -38,23 +38,23 @@ export default function VerifyOTPScreen() {
 
   const handleCodeChange = (text: string, index: number) => {
     const newCode = [...code];
-    
+
     if (text.length > 1) {
       const pastedCode = text.slice(0, 4).split('');
       for (let i = 0; i < pastedCode.length && i < 4; i++) {
         newCode[i] = pastedCode[i];
       }
       setCode(newCode);
-      
+
       const lastIndex = Math.min(pastedCode.length - 1, 3);
       inputs.current[lastIndex]?.focus();
-      
+
       if (pastedCode.length === 4) {
         verifyCode(newCode.join(''));
       }
       return;
     }
-    
+
     newCode[index] = text;
     setCode(newCode);
 
@@ -80,16 +80,19 @@ export default function VerifyOTPScreen() {
     setIsVerifying(true);
     try {
       const success = await verifyOTP(fullCode);
-      
+
       if (success) {
+        // ✅ Success - navigate to main app
         router.replace('/(tabs)' as any);
       } else {
-        Alert.alert('Invalid Code', 'Please check your code and try again');
+        // ❌ Failed - AuthContext already showed the appropriate alert
+        // Just clear the code and let user try again or go back
         setCode(['', '', '', '']);
         inputs.current[0]?.focus();
       }
     } catch (error) {
-      Alert.alert('Invalid Code', 'Please check your code and try again');
+      console.error('Verification error:', error);
+      // Only show generic error if something unexpected happened
       setCode(['', '', '', '']);
       inputs.current[0]?.focus();
     } finally {
@@ -99,7 +102,7 @@ export default function VerifyOTPScreen() {
 
   const handleResendOTP = async () => {
     if (resendTimer > 0) return;
-    
+
     try {
       const success = await resendOTP();
       if (success) {
@@ -113,7 +116,7 @@ export default function VerifyOTPScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.backButton}
         onPress={() => router.back()}
       >
@@ -157,7 +160,7 @@ export default function VerifyOTPScreen() {
           </View>
         )}
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.resendButton}
           onPress={handleResendOTP}
           disabled={resendTimer > 0}
@@ -169,8 +172,6 @@ export default function VerifyOTPScreen() {
             </Text>
           </Text>
         </TouchableOpacity>
-
-        {/* 🔥 REMOVED ``HINT */}
       </View>
     </SafeAreaView>
   );

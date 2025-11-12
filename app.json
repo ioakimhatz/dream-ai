@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ioakimxtz.dreamai",
-      "buildNumber": "10",
+      "buildNumber": "12",
       "usesAppleSignIn": true,
       "googleServicesFile": "./ios/GoogleService-Info.plist",
       "appleTeamId": "P79PBYKHK9",
@@ -33,7 +33,7 @@
         ]
       },
       "entitlements": {
-        "aps-environment": "development"
+        "aps-environment": "production"
       },
       "config": {
         "googleSignIn": {

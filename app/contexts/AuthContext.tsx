@@ -1,4 +1,4 @@
-// app/contexts/AuthContext.tsx - FIXED: Removed duplicate subscription tracking
+// app/contexts/AuthContext.tsx - COMPLETE FIXED VERSION
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -8,21 +8,23 @@ import { Alert, Platform } from 'react-native';
 import { EmailService } from '../../lib/emailjs-service';
 
 // 🔥 Firebase imports
-import { 
-  signInWithCredential, 
+import {
+  signInWithCredential,
   GoogleAuthProvider,
   OAuthProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  fetchSignInMethodsForEmail,
+  EmailAuthProvider,
+  linkWithCredential
 } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 
-// 🔥 REMOVED: dreamUsage from User interface - handled by DreamUsageContext
 export interface User {
-  id: string; // Firebase UID (stable across devices)
+  id: string;
   email: string;
   name: string;
   photo?: string | null;
@@ -61,8 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         if (firebaseUser) {
           console.log('✅ Firebase user detected:', firebaseUser.uid);
-          
-          // Create user object WITHOUT dreamUsage (handled by DreamUsageContext)
+
           const userData: User = {
             id: firebaseUser.uid,
             email: firebaseUser.email || '',
@@ -118,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      // Verify OTP locally
+      // ✅ STEP 1: Verify OTP locally
       const [storedOTP, storedEmail, storedExpires] = await AsyncStorage.multiGet([
         'temp_otp',
         'temp_otp_email',
@@ -127,68 +128,162 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (storedExpires && Date.now() > parseInt(storedExpires, 10)) {
         await AsyncStorage.multiRemove(['temp_otp', 'temp_otp_email', 'temp_otp_expires']);
-        Alert.alert('Error', 'Verification code has expired. Please request a new one.');
+        Alert.alert('Expired Code', 'Your verification code has expired. Please request a new one.');
         return false;
       }
 
       if (storedEmail !== tempEmail || storedOTP !== code) {
-        Alert.alert('Error', 'Invalid verification code');
+        Alert.alert('Invalid Code', 'The code you entered is incorrect. Please try again.');
         return false;
       }
 
+      console.log('✅ OTP verified successfully');
       await AsyncStorage.multiRemove(['temp_otp', 'temp_otp_email', 'temp_otp_expires']);
 
-      // 🔥 Use stored password or create new one for this email
+      // ✅ STEP 2: Get or generate password for this email
       const passwordKey = `firebase_pwd_${tempEmail}`;
       let storedPassword = await AsyncStorage.getItem(passwordKey);
-      
+
       if (!storedPassword) {
         storedPassword = Math.random().toString(36).slice(-16) + Math.random().toString(36).slice(-16);
         await AsyncStorage.setItem(passwordKey, storedPassword);
+        console.log('✅ Generated new password for email');
+      } else {
+        console.log('✅ Using existing password for email');
       }
 
-      try {
-        // Try to sign in first
-        const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, storedPassword);
-        console.log('✅ Signed in existing user:', signInCredential.user.uid);
+      // ✅ STEP 3: Check if account exists with this email
+      const signInMethods = await fetchSignInMethodsForEmail(auth, tempEmail);
+      console.log('📧 Sign-in methods for this email:', signInMethods);
 
-        await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-        setTempEmail(null);
-        setTempOTP(null);
+      // ✅ STEP 4: Handle different scenarios
+      if (signInMethods.length === 0) {
+        // 🆕 No account exists - create new one
+        console.log('🆕 Creating new account with email/password');
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, tempEmail, storedPassword);
+          console.log('✅ Created new user:', userCredential.user.uid);
 
-        return true;
-      } catch (signInError: any) {
-        // If sign in fails, create new user
-        if (signInError.code === 'auth/user-not-found' || 
-            signInError.code === 'auth/wrong-password' || 
-            signInError.code === 'auth/invalid-credential') {
-          try {
-            const userCredential = await createUserWithEmailAndPassword(auth, tempEmail, storedPassword);
-            console.log('✅ Created new user:', userCredential.user.uid);
-            
-            await updateProfile(userCredential.user, {
-              displayName: tempEmail.split('@')[0]
-            });
+          await updateProfile(userCredential.user, {
+            displayName: tempEmail.split('@')[0]
+          });
 
-            await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
-            setTempEmail(null);
-            setTempOTP(null);
+          await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+          setTempEmail(null);
+          setTempOTP(null);
 
-            return true;
-          } catch (createError: any) {
-            console.error('Create user error:', createError);
-            if (createError.code === 'auth/email-already-in-use') {
-              Alert.alert('Account Exists', 'An account with this email already exists. Please use a different sign-in method.');
+          return true;
+        } catch (createError: any) {
+          console.error('❌ Create user error:', createError);
+
+          // 🔥 EDGE CASE: If account exists but wasn't detected by fetchSignInMethodsForEmail
+          if (createError.code === 'auth/email-already-in-use') {
+            console.log('⚠️ Account exists but was not detected. Trying to sign in...');
+
+            try {
+              // Try signing in with the stored password
+              const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, storedPassword);
+              console.log('✅ Successfully signed in to existing account:', signInCredential.user.uid);
+
+              await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+              setTempEmail(null);
+              setTempOTP(null);
+
+              return true;
+            } catch (signInError: any) {
+              console.error('❌ Sign in also failed:', signInError);
+
+              // Account exists but with different credentials (Google/Apple)
+              Alert.alert(
+                'Account Already Exists',
+                'This email is already registered. Please sign in using the same method you used before (Google, Apple, or email).',
+                [
+                  {
+                    text: 'Go Back',
+                    onPress: () => router.back()
+                  }
+                ]
+              );
               return false;
             }
-            throw createError;
           }
+
+          Alert.alert('Error', 'Failed to create account. Please try again.');
+          return false;
         }
-        throw signInError;
+      } else if (signInMethods.includes('password')) {
+        // 🔑 Account exists with email/password - sign in
+        console.log('🔑 Account exists with password, signing in');
+        try {
+          const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, storedPassword);
+          console.log('✅ Signed in existing user:', signInCredential.user.uid);
+
+          await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+          setTempEmail(null);
+          setTempOTP(null);
+
+          return true;
+        } catch (signInError: any) {
+          console.error('❌ Sign in error:', signInError);
+          if (signInError.code === 'auth/wrong-password' || signInError.code === 'auth/invalid-credential') {
+            Alert.alert(
+              'Account Found',
+              'An account exists with this email but with a different sign-in method. Please use the same method you used before.'
+            );
+            return false;
+          }
+          Alert.alert('Error', 'Failed to sign in. Please try again.');
+          return false;
+        }
+      } else {
+        // 🔗 Account exists with other methods (Google/Apple)
+        console.log('🔗 Account exists with other methods:', signInMethods);
+
+        // Format the sign-in methods nicely
+        const methodNames = signInMethods
+          .map(method => {
+            if (method === 'google.com') return 'Google';
+            if (method === 'apple.com') return 'Apple';
+            return method;
+          })
+          .join(' or ');
+
+        Alert.alert(
+          'Account Already Exists',
+          `This email is already linked to a ${methodNames} account. Please use the "${methodNames}" button to sign in.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back to sign-in screen
+                router.back();
+              }
+            }
+          ]
+        );
+        return false;
       }
-    } catch (e) {
-      console.error('verifyOTP error:', e);
-      Alert.alert('Error', 'Verification failed. Please try again.');
+    } catch (e: any) {
+      console.error('❌ verifyOTP error:', e);
+
+      // Handle specific Firebase errors
+      if (e.code === 'auth/email-already-in-use') {
+        Alert.alert(
+          'Account Already Exists',
+          'An account with this email already exists. Please use your original sign-in method (Google or Apple).',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else if (e.code === 'auth/network-request-failed') {
+        Alert.alert('Network Error', 'Please check your internet connection and try again.');
+      } else {
+        Alert.alert('Error', 'Something went wrong. Please try again.');
+      }
+
       return false;
     }
   };
@@ -214,12 +309,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.replace('/');
     } catch (e: any) {
       console.error('Google Sign-In Error:', e);
-      
+
       if (e?.code === 'USER_CANCELED' || e?.code === '-5' || e?.message?.includes('cancel')) {
         console.log('User canceled Google Sign-In');
         throw new Error('SIGN_IN_CANCELLED');
       }
-      
+
       Alert.alert('Sign In Failed', e?.message || 'Please try again');
       throw e;
     } finally {
@@ -253,13 +348,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Smart name extraction
       let name = 'Apple User';
-      
+
       if (credential.fullName) {
         const { givenName, familyName } = credential.fullName;
         const built = [givenName, familyName].filter(Boolean).join(' ').trim();
         if (built) name = built;
       }
-      
+
       if (name === 'Apple User' && credential.email) {
         const emailPrefix = credential.email.split('@')[0];
         const looksLikeAppleID = (
@@ -270,7 +365,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           emailPrefix.includes('eba') ||
           emailPrefix.includes('403')
         );
-        
+
         if (!looksLikeAppleID) name = emailPrefix;
       }
 
@@ -298,7 +393,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setIsLoading(true);
 
-      // Create local user (fallback - not recommended for production)
       const userData: User = {
         id: `local_${Date.now()}`,
         email,
@@ -347,24 +441,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setIsLoading(true);
       console.log('🔥 Signing out user:', user?.id);
-      
-      // Sign out from Google
+
       try {
         await GoogleSignin.signOut();
         console.log('✅ Signed out from Google');
-      } catch {}
-      
-      // Sign out from Firebase
+      } catch { }
+
       await firebaseSignOut(auth);
       console.log('✅ Signed out from Firebase');
-      
-      // Clear user data
+
       await AsyncStorage.removeItem('user');
       console.log('✅ Cleared user from AsyncStorage');
-      
+
       await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       setUser(null);
-      
+
       router.replace('/welcome');
     } catch (e) {
       console.error('Sign out error:', e);
@@ -375,17 +466,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateUserName = async (newName: string) => {
     if (!user) return;
-    
-    // Update Firebase profile
+
     if (auth.currentUser) {
       await updateProfile(auth.currentUser, { displayName: newName });
     }
-    
+
     const updated: User = {
       ...user,
       name: newName,
     };
-    
+
     setUser(updated);
     await AsyncStorage.setItem('user', JSON.stringify(updated));
   };

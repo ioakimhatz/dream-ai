@@ -1,4 +1,4 @@
-// app/(tabs)/settings.tsx - UPDATED WITH LANGUAGE CONTEXT
+// app/(tabs)/settings.tsx - FIXED: Proper account deletion with Firebase Auth + Firestore
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -25,12 +25,20 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
-import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext'; // ✅ NEW
+import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext';
+import { SubscriptionModal } from '@/components/SubscriptionModal';
+
+// 🔥 NEW: Import Firebase functions for account deletion
+import { deleteUser } from 'firebase/auth';
+import { auth } from '../config/firebaseConfig';
+import { getFirestore, doc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import Purchases from 'react-native-purchases';
+
+const firestore = getFirestore();
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  
-  // ✅ NEW: Use language from context instead of local state
+
   const { language, setLanguage } = useLanguage();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -41,6 +49,8 @@ export default function SettingsScreen() {
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [tempName, setTempName] = useState('');
 
+  const [isPurchasing, setIsPurchasing] = useState(false);
+
   const { user, signOut, updateUserName } = useAuth();
   const {
     dreamUsage,
@@ -50,6 +60,8 @@ export default function SettingsScreen() {
     purchaseSubscription,
     restorePurchases,
     refreshSubscriptionStatus,
+    upgradeOrDowngradePlan,
+    getUpgradeDowngradeInfo,
   } = useDreamUsage();
 
   useEffect(() => {
@@ -57,13 +69,11 @@ export default function SettingsScreen() {
       try {
         const { status } = await Notifications.getPermissionsAsync();
         setNotificationPermissionStatus(status);
-        
+
         const saved = await AsyncStorage.getItem('notifications');
         if (saved !== null) {
           setNotificationsEnabled(JSON.parse(saved));
         }
-        
-        // ✅ REMOVED: No need to load language from AsyncStorage, LanguageContext handles it
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -79,12 +89,12 @@ export default function SettingsScreen() {
       if (value) {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
-        
+
         if (existingStatus !== 'granted') {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
         }
-        
+
         if (finalStatus !== 'granted') {
           Alert.alert(
             'Permission Required',
@@ -96,11 +106,11 @@ export default function SettingsScreen() {
           );
           return;
         }
-        
+
         setNotificationPermissionStatus(finalStatus);
         setNotificationsEnabled(true);
         await AsyncStorage.setItem('notifications', JSON.stringify(true));
-        
+
         await Notifications.setNotificationHandler({
           handleNotification: async () => ({
             shouldShowAlert: true,
@@ -120,10 +130,9 @@ export default function SettingsScreen() {
     }
   };
 
-  // ✅ UPDATED: Use context's setLanguage which handles AsyncStorage automatically
   const handleLanguageSelect = async (languageCode: string) => {
     try {
-      await setLanguage(languageCode); // ✅ This saves to AsyncStorage automatically
+      await setLanguage(languageCode);
       setShowLanguageModal(false);
       console.log('✅ Language updated to:', languageCode);
     } catch (e) {
@@ -172,7 +181,7 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Name cannot be empty');
       return;
     }
-    
+
     await updateUserName(tempName.trim());
     setShowEditNameModal(false);
   };
@@ -183,19 +192,47 @@ export default function SettingsScreen() {
       { text: 'Sign Out', style: 'destructive', onPress: signOut },
     ]);
 
+  // 🔥 COMPLETELY REWRITTEN: Proper account deletion with Firebase + Firestore
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
-      'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
+      'This will permanently delete your account and all data. You won\'t be able to sign in again.\n\nSubscriptions will stay active until canceled in App Store settings.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
-          style: 'destructive', 
+        {
+          text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
             try {
+              if (!user || !auth.currentUser) {
+                Alert.alert('Error', 'Please sign in first');
+                return;
+              }
+
               console.log('🗑️ Starting account deletion...');
-              
+
+              // Step 1: Try to delete Firestore user data (optional)
+              try {
+                const userDocRef = doc(firestore, 'users', user.id);
+                await deleteDoc(userDocRef);
+                console.log('✅ Firestore deleted');
+
+                try {
+                  const dreamsRef = collection(firestore, 'users', user.id, 'dreams');
+                  const dreamsSnapshot = await getDocs(dreamsRef);
+                  for (const dreamDoc of dreamsSnapshot.docs) {
+                    await deleteDoc(dreamDoc.ref);
+                  }
+                  console.log('✅ Subcollections deleted');
+                } catch (subError) {
+                  console.warn('⚠️ Subcollections skip:', subError);
+                }
+              } catch (firestoreError) {
+                console.warn('⚠️ Firestore skip:', firestoreError);
+              }
+
+              // Step 2: Clear local data
+              console.log('💾 Clearing local data...');
               const keysToRemove = [
                 'user',
                 'hasCompletedOnboarding',
@@ -204,37 +241,75 @@ export default function SettingsScreen() {
                 'temp_otp',
                 'temp_otp_email',
                 'temp_otp_expires',
+                '@dream_usage',
+                '@subscription_info',
               ];
-              
               await AsyncStorage.multiRemove(keysToRemove);
-              console.log('✅ All user data removed from storage');
-              
+              console.log('✅ Local data cleared');
+
+              // Step 3: Sign out from services
               try {
                 const { GoogleSignin } = require('@react-native-google-signin/google-signin');
                 if (await GoogleSignin.isSignedIn()) {
                   await GoogleSignin.signOut();
-                  console.log('✅ Signed out from Google');
                 }
               } catch (e) {
-                console.log('No Google sign-in to clear');
+                console.log('⚠️ Google skip');
               }
-              
+
+              try {
+                const customerInfo = await Purchases.getCustomerInfo();
+                if (!customerInfo.originalAppUserId.startsWith('$RCAnonymousID')) {
+                  await Purchases.logOut();
+                }
+              } catch (e) {
+                console.warn('⚠️ RevenueCat skip');
+              }
+
+              // Step 4: Delete account (CRITICAL)
+              console.log('🔥 Deleting account...');
+              try {
+                await deleteUser(auth.currentUser);
+                console.log('✅ ✅ ✅ Account DELETED');
+              } catch (authError: any) {
+                console.error('❌ Delete error:', authError);
+
+                if (authError.code === 'auth/requires-recent-login') {
+                  Alert.alert(
+                    'Security Check',
+                    'For security, please sign out and sign in again, then try deleting immediately.',
+                    [{ text: 'OK', onPress: () => signOut() }]
+                  );
+                  return;
+                }
+
+                throw authError;
+              }
+
+              // Success - navigate away
               router.replace('/welcome');
-              
-              Alert.alert(
-                'Account Deleted',
-                'Your account and all associated data have been permanently deleted. We\'re sad to see you go!',
-                [{ text: 'OK' }]
-              );
-              
-              console.log('✅ Account deletion complete');
-            } catch (error) {
-              console.error('❌ Account deletion error:', error);
-              Alert.alert(
-                'Error',
-                'Failed to delete account. Please try again or contact support.',
-                [{ text: 'OK' }]
-              );
+
+              setTimeout(() => {
+                Alert.alert(
+                  'Account Deleted',
+                  'Your account has been permanently deleted.',
+                  [{ text: 'OK' }]
+                );
+              }, 500);
+
+              console.log('✅ Complete!');
+            } catch (error: any) {
+              console.error('❌ Failed:', error);
+
+              let errorMessage = 'Something went wrong. Please try again.';
+
+              if (error.code === 'auth/requires-recent-login') {
+                errorMessage = 'Please sign in again and try immediately.';
+              } else if (error.code === 'auth/network-request-failed') {
+                errorMessage = 'Check your internet connection.';
+              }
+
+              Alert.alert('Delete Failed', errorMessage, [{ text: 'OK' }]);
             }
           }
         },
@@ -245,61 +320,79 @@ export default function SettingsScreen() {
   const handleSignIn = () => router.push('/(auth)/signin');
 
   const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
-    const productMap: Record<string, string> = { 
-      weekly: 'dream_weekly', 
-      basic: 'dream_basic_monthly', 
-      pro: 'dream_pro_monthly' 
+    if (isPurchasing) {
+      console.log('⚠️ Purchase already in progress, ignoring tap');
+      return;
+    }
+
+    const productMap: Record<string, string> = {
+      weekly: 'dream_weekly',
+      basic: 'dream_basic_monthly',
+      pro: 'dream_pro_monthly'
     };
-    
+
     const productId = productMap[planType];
-    
+
+    if (subscription?.id === productId) {
+      Alert.alert('Already Subscribed', `You're already on the ${subscription.name} plan!`);
+      return;
+    }
+
     if (!offerings?.availablePackages) {
       Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
       return;
     }
-    
+
     console.log('💳 [Settings] Looking for product ID:', productId);
-    console.log('💳 [Settings] Available packages:', offerings.availablePackages.map(p => ({
-      identifier: p.identifier,
-      productId: p.product.identifier
-    })));
-    
+
     const packageToPurchase = offerings.availablePackages.find(
       (p) => p.product.identifier === productId
     );
-    
+
     if (!packageToPurchase) {
       Alert.alert('Error', 'Selected plan is not available. Please try again.');
       return;
     }
-    
+
     console.log('✅ [Settings] Found package:', packageToPurchase.identifier);
-    
-    setShowSubscriptionModal(false);
-    
-    const success = await purchaseSubscription(packageToPurchase);
-    
-    if (success) {
-      await refreshSubscriptionStatus();
+
+    setIsPurchasing(true);
+
+    try {
+      let success = false;
+
+      if (subscription) {
+        console.log('🔄 User has subscription, using upgrade/downgrade flow');
+        success = await upgradeOrDowngradePlan(packageToPurchase);
+      } else {
+        console.log('💳 New subscriber, using regular purchase flow');
+        success = await purchaseSubscription(packageToPurchase);
+      }
+
+      if (success) {
+        setShowSubscriptionModal(false);
+        console.log('✅ Modal closed. Subscription is now:', subscription?.name);
+      }
+    } finally {
+      setIsPurchasing(false);
     }
   };
 
   const getDaysUntilReset = () => {
     const resetDate = new Date(dreamUsage.resetDate);
     const now = new Date();
-    
+
     const days = Math.ceil((resetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     return days > 0 ? days : 0;
   };
 
-  // ✅ UPDATED: Use SUPPORTED_LANGUAGES from context
   const getCurrentLanguageName = () => {
     return SUPPORTED_LANGUAGES.find(l => l.code === language)?.name || 'English';
   };
 
   const getDisplayName = () => {
     if (!user) return 'Tap to set name';
-    
+
     if (
       !user.name ||
       user.name === 'User' ||
@@ -310,17 +403,17 @@ export default function SettingsScreen() {
     ) {
       return 'Tap to set name';
     }
-    
+
     return user.name;
   };
 
   const getDisplayEmail = () => {
     if (!user) return 'and username';
-    
+
     if (user.email.includes('privaterelay.appleid.com') || user.email.length > 50) {
       return 'and username';
     }
-    
+
     return user.email;
   };
 
@@ -361,11 +454,11 @@ export default function SettingsScreen() {
                       </Text>
                     </View>
                   )}
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     onPress={(e) => {
                       e.stopPropagation();
                       handleEditAvatar();
-                    }} 
+                    }}
                     style={styles.editBadge}
                   >
                     <Text style={styles.editBadgeText}>✎</Text>
@@ -452,7 +545,7 @@ export default function SettingsScreen() {
               <>
                 <View style={styles.freeAccountInfo}>
                   <Text style={styles.freeAccountTitle}>
-                    {user ? 'No Active Subscription' : 'Sign in to Subscribe'}
+                    {user ? 'Free Plan' : 'Sign in to Subscribe'}
                   </Text>
                   <Text style={styles.freeAccountSubtext}>
                     {user
@@ -543,6 +636,7 @@ export default function SettingsScreen() {
         onRestore={restorePurchases}
         onSelectPlan={handleSelectPlan}
         currentId={subscription?.id}
+        isPurchasing={isPurchasing}
       />
 
       <Modal
@@ -554,7 +648,7 @@ export default function SettingsScreen() {
         <View style={styles.editNameModalContainer}>
           <View style={styles.editNameModalContent}>
             <Text style={styles.editNameTitle}>Edit Name</Text>
-            
+
             <TextInput
               style={styles.editNameInput}
               value={tempName}
@@ -603,11 +697,10 @@ export default function SettingsScreen() {
               Choose the language for voice transcription
             </Text>
 
-            <ScrollView 
+            <ScrollView
               style={styles.languageList}
               showsVerticalScrollIndicator={false}
             >
-              {/* ✅ UPDATED: Use SUPPORTED_LANGUAGES from context */}
               {SUPPORTED_LANGUAGES.map((lang) => (
                 <TouchableOpacity
                   key={lang.code}
@@ -636,121 +729,6 @@ export default function SettingsScreen() {
         </View>
       </Modal>
     </>
-  );
-}
-
-function SubscriptionModal({
-  visible,
-  onClose,
-  onRestore,
-  onSelectPlan,
-  currentId,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onRestore: () => void;
-  onSelectPlan: (plan: 'weekly' | 'basic' | 'pro') => void;
-  currentId?: string;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Choose Your Plan</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView showsVerticalScrollIndicator={false} bounces>
-            <TouchableOpacity
-              style={[styles.planCard, currentId === 'dream_weekly' && styles.currentPlan]}
-              onPress={() => onSelectPlan('weekly')}
-              disabled={currentId === 'dream_weekly'}
-            >
-              <View style={styles.planHeader}>
-                <Text style={styles.planName}>Weekly</Text>
-                {currentId === 'dream_weekly' && (
-                  <View style={styles.currentBadge}>
-                    <Text style={styles.currentBadgeText}>CURRENT</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.planPrice}>$3.49/week</Text>
-              <View style={styles.planFeatures}>
-                <Text style={styles.planFeature}>• 1 dream per week</Text>
-                <Text style={styles.planFeature}>• HD quality videos</Text>
-                <Text style={styles.planFeature}>• Low commitment</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.planCard, currentId === 'dream_basic_monthly' && styles.currentPlan]}
-              onPress={() => onSelectPlan('basic')}
-              disabled={currentId === 'dream_basic_monthly'}
-            >
-              <View style={styles.planHeader}>
-                <Text style={styles.planName}>Basic Monthly</Text>
-                {currentId === 'dream_basic_monthly' && (
-                  <View style={styles.currentBadge}>
-                    <Text style={styles.currentBadgeText}>CURRENT</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.planPrice}>$9.49/month</Text>
-              <View style={styles.planFeatures}>
-                <Text style={styles.planFeature}>• 3 dreams per month</Text>
-                <Text style={styles.planFeature}>• HD quality videos</Text>
-                <Text style={styles.planFeature}>• Basic support</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.planCard, styles.recommendedPlan, currentId === 'dream_pro_monthly' && styles.currentPlan]}
-              onPress={() => onSelectPlan('pro')}
-              disabled={currentId === 'dream_pro_monthly'}
-            >
-              <View style={styles.savingsBadge}>
-                <Text style={styles.savingsText}>BEST VALUE</Text>
-              </View>
-              <View style={styles.planHeader}>
-                <Text style={styles.planName}>Pro Monthly</Text>
-                {currentId === 'dream_pro_monthly' && (
-                  <View style={styles.currentBadge}>
-                    <Text style={styles.currentBadgeText}>CURRENT</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.planPrice}>$12.49/month</Text>
-              <Text style={styles.planSubtext}>Just $2.50 per dream</Text>
-              <View style={styles.planFeatures}>
-                <Text style={styles.planFeature}>• 5 dreams per month</Text>
-                <Text style={styles.planFeature}>• HD quality videos</Text>
-                <Text style={styles.planFeature}>• Priority support</Text>
-                <Text style={styles.planFeature}>• Early access to features</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.restoreModalButton} onPress={() => { onClose(); onRestore(); }}>
-              <Text style={styles.restoreModalButtonText}>Restore Purchases</Text>
-            </TouchableOpacity>
-
-            <View style={styles.legalLinks}>
-              <TouchableOpacity onPress={() => { onClose(); router.push('/terms-of-service'); }}>
-                <Text style={styles.legalLinkText}>Terms of Service</Text>
-              </TouchableOpacity>
-              <Text style={styles.legalSeparator}> • </Text>
-              <TouchableOpacity onPress={() => { onClose(); router.push('/privacy-policy'); }}>
-                <Text style={styles.legalLinkText}>Privacy Policy</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.legalText}>Subscriptions auto-renew. Cancel anytime in App Store.</Text>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -802,57 +780,57 @@ const styles = StyleSheet.create({
   signInTitle: { fontSize: 18, fontWeight: Platform.OS === 'ios' ? '700' : 'bold', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', color: '#0A2540', marginBottom: 4 },
   signInSubtext: { fontSize: 14, color: '#68707D' },
   signInArrow: { fontSize: 24, color: '#9CA3AF' },
-  profileSection: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingVertical: 16, 
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
     paddingHorizontal: 12,
     backgroundColor: '#FAFAFA',
     borderRadius: 12,
     marginBottom: 20,
   },
-  avatarContainer: { 
-    position: 'relative', 
-    marginRight: 16 
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 16
   },
-  avatar: { 
-    width: 64, 
-    height: 64, 
-    borderRadius: 32 
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32
   },
-  avatarPlaceholder: { 
-    width: 64, 
-    height: 64, 
-    borderRadius: 32, 
-    backgroundColor: '#7278E6', 
-    alignItems: 'center', 
-    justifyContent: 'center' 
+  avatarPlaceholder: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#7278E6',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  avatarText: { 
-    fontSize: 24, 
-    color: '#fff', 
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', 
-    fontWeight: 'bold' 
+  avatarText: {
+    fontSize: 24,
+    color: '#fff',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    fontWeight: 'bold'
   },
-  editBadge: { 
-    position: 'absolute', 
-    bottom: -2, 
-    right: -2, 
-    backgroundColor: '#7278E6', 
-    width: 20, 
-    height: 20, 
-    borderRadius: 10, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    borderWidth: 2, 
-    borderColor: '#fff' 
+  editBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#7278E6',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff'
   },
-  editBadgeText: { 
-    fontSize: 10, 
-    color: '#fff' 
+  editBadgeText: {
+    fontSize: 10,
+    color: '#fff'
   },
-  nameContainer: { 
-    flex: 1 
+  nameContainer: {
+    flex: 1
   },
   tapToSetText: {
     fontSize: 18,
@@ -998,10 +976,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   subscriptionCard: { minHeight: 140 },
-  planBadge: { 
-    backgroundColor: '#7278E6', 
-    paddingHorizontal: 14, 
-    paddingVertical: 8, 
+  planBadge: {
+    backgroundColor: '#7278E6',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 10,
     alignSelf: 'flex-start',
     marginBottom: 12,
@@ -1027,12 +1005,12 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
     marginTop: 4,
   },
-  usageContainer: { 
-    backgroundColor: '#F3F4F6', 
-    borderRadius: 16, 
-    padding: 20, 
-    marginBottom: 16, 
-    marginHorizontal: 10 
+  usageContainer: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    marginHorizontal: 10
   },
   usageHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   usageTitle: { fontSize: 14, color: '#6B7280' },
@@ -1056,44 +1034,4 @@ const styles = StyleSheet.create({
   languageDisplay: { flexDirection: 'row', alignItems: 'center' },
   currentLanguage: { fontSize: 16, color: '#7278E6', marginRight: 8, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: '600' },
   footer: { textAlign: 'center', color: 'rgba(255,255,255,0.85)', marginTop: 10 },
-  modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', paddingBottom: 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 24, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
-  closeButton: { padding: 4 },
-  closeButtonText: { fontSize: 24, color: '#6B7280' },
-  planCard: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 20, marginHorizontal: 20, marginTop: 16, borderWidth: 2, borderColor: '#E5E7EB', position: 'relative' },
-  recommendedPlan: { borderColor: '#10B981', backgroundColor: '#F0FDF4' },
-  currentPlan: { opacity: 0.7 },
-  savingsBadge: { position: 'absolute', top: -10, left: 20, backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  savingsText: { color: '#fff', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  planName: { fontSize: 22, color: '#0A2540', fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
-  currentBadge: { backgroundColor: '#6B7280', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  currentBadgeText: { color: '#fff', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
-  planPrice: { fontSize: 28, color: '#7278E6', marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', fontWeight: 'bold' },
-  planSubtext: { fontSize: 14, color: '#6B7280', marginBottom: 12 },
-  planFeatures: { marginTop: 12 },
-  planFeature: { fontSize: 14, color: '#4B5563', marginBottom: 6 },
-  restoreModalButton: { alignItems: 'center', marginTop: 24, marginBottom: 12 },
-  restoreModalButtonText: { color: '#7278E6', fontSize: 14, textDecorationLine: 'underline' },
-  legalLinks: { 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    marginTop: 8,
-    marginBottom: 8 
-  },
-  legalLinkText: { 
-    fontSize: 12, 
-    color: '#7C86FF', 
-    textDecorationLine: 'underline',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
-  },
-  legalSeparator: { 
-    fontSize: 12, 
-    color: '#9CA3AF',
-    marginHorizontal: 4,
-  },
-  legalText: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginHorizontal: 20, marginBottom: 20 },
 });
