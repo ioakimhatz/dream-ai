@@ -24,8 +24,6 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
-import 'react-native-get-random-values';
-import { v4 as uuid } from 'uuid';
 
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
@@ -366,10 +364,10 @@ export default function HomeScreen() {
               setVideoKey(prev => prev + 1);
               setActiveJobId(null);
 
-              const dreamId = uuid();
-              setCompletedDreamId(dreamId);
+              // 🔥 Use job.id instead of generating new UUID to prevent duplicates
+              setCompletedDreamId(job.id);
               saveDream({
-                id: dreamId,
+                id: job.id,
                 createdAt: Date.now(),
                 prompt: transcript,
                 thumbnailUrl: job.thumbnailUrl ?? null,
@@ -378,7 +376,7 @@ export default function HomeScreen() {
                 duration: 15,
               });
 
-              sendVideoReadyNotification(job.videoUrl);
+              sendVideoReadyNotification(job.videoUrl, job.id);
               Alert.alert('Dream Created!', 'Your dream cinema is ready!');
             } else if (job && job.status === 'failed') {
               console.error('❌ Job failed while app was in background');
@@ -397,7 +395,7 @@ export default function HomeScreen() {
                 [{ text: 'OK' }]
               );
 
-              sendVideoFailedNotification();
+              sendVideoFailedNotification(job.id);
             }
           } catch (error) {
             console.error('❌ Failed to check job status:', error);
@@ -657,10 +655,10 @@ export default function HomeScreen() {
             setCoverImage(job.thumbnailUrl ?? null);
             setVideoKey(prev => prev + 1);
 
-            const dreamId = uuid();
-            setCompletedDreamId(dreamId);
+            // 🔥 Use job.id instead of generating new UUID to prevent duplicates
+            setCompletedDreamId(job.id);
             saveDream({
-              id: dreamId,
+              id: job.id,
               createdAt: Date.now(),
               prompt: transcript,
               thumbnailUrl: job.thumbnailUrl ?? null,
@@ -669,7 +667,7 @@ export default function HomeScreen() {
               duration: 15,
             });
 
-            sendVideoReadyNotification(job.videoUrl);
+            sendVideoReadyNotification(job.videoUrl, job.id);
             Alert.alert('Dream Created!', 'Your dream cinema is ready!');
 
             setActiveJobId(null);
@@ -693,7 +691,7 @@ export default function HomeScreen() {
               [{ text: 'OK' }]
             );
 
-            sendVideoFailedNotification();
+            sendVideoFailedNotification(job.id);
 
             setActiveJobId(null);
             unsubscribe();

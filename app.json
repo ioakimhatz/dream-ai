@@ -3,7 +3,7 @@
     "name": "Dream AI",
     "slug": "dreamverse-fresh",
     "owner": "ioakimxtz",
-    "version": "1.0.9",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/logodreamai1024.png",
     "scheme": "dreamai",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ioakimxtz.dreamai",
-      "buildNumber": "12",
+      "buildNumber": "14",
       "usesAppleSignIn": true,
       "googleServicesFile": "./ios/GoogleService-Info.plist",
       "appleTeamId": "P79PBYKHK9",

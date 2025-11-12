@@ -93,22 +93,76 @@ export async function saveFCMToken(userId: string, token: string): Promise<void>
 }
 
 /**
+ * Check if we've already sent a local notification for this job
+ */
+async function hasNotifiedForJob(jobId: string): Promise<boolean> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const notifiedJobs = await AsyncStorage.getItem('@notified_jobs');
+    if (!notifiedJobs) return false;
+
+    const jobsArray: string[] = JSON.parse(notifiedJobs);
+    return jobsArray.includes(jobId);
+  } catch (error) {
+    console.error('❌ Failed to check notification status:', error);
+    return false; // On error, allow notification
+  }
+}
+
+/**
+ * Mark a job as notified
+ */
+async function markJobAsNotified(jobId: string): Promise<void> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const notifiedJobs = await AsyncStorage.getItem('@notified_jobs');
+    const jobsArray: string[] = notifiedJobs ? JSON.parse(notifiedJobs) : [];
+
+    if (!jobsArray.includes(jobId)) {
+      jobsArray.push(jobId);
+      // Keep only last 100 job IDs to prevent unbounded growth
+      const trimmedArray = jobsArray.slice(-100);
+      await AsyncStorage.setItem('@notified_jobs', JSON.stringify(trimmedArray));
+      console.log(`📋 Marked job ${jobId} as notified`);
+    }
+  } catch (error) {
+    console.error('❌ Failed to mark job as notified:', error);
+  }
+}
+
+/**
  * Send a local notification when video is ready
  * (Fallback for when push notifications fail)
+ * Only sends once per jobId to prevent duplicates
  */
-export async function sendVideoReadyNotification(videoUrl: string): Promise<void> {
+export async function sendVideoReadyNotification(videoUrl: string, jobId?: string): Promise<void> {
   try {
+    // If jobId provided, check if we already notified
+    if (jobId) {
+      const alreadyNotified = await hasNotifiedForJob(jobId);
+      if (alreadyNotified) {
+        console.log(`⏭️ Skipping notification for job ${jobId} - already sent`);
+        return;
+      }
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '🎬 Your Dream is Ready!',
         body: 'Your dream video has been generated successfully. Tap to view!',
-        data: { videoUrl, type: 'video_ready' },
+        data: { videoUrl, type: 'video_ready', jobId: jobId || '' },
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.HIGH,
       },
       trigger: null, // Send immediately
     });
-    console.log('✅ Local notification sent: Video ready');
+
+    console.log(`✅ Local notification sent: Video ready${jobId ? ` (job: ${jobId})` : ''}`);
+
+    // Mark as notified
+    if (jobId) {
+      await markJobAsNotified(jobId);
+    }
   } catch (error) {
     console.error('❌ Failed to send local notification:', error);
   }
@@ -116,20 +170,36 @@ export async function sendVideoReadyNotification(videoUrl: string): Promise<void
 
 /**
  * Send a local notification when video generation fails
+ * Only sends once per jobId to prevent duplicates
  */
-export async function sendVideoFailedNotification(): Promise<void> {
+export async function sendVideoFailedNotification(jobId?: string): Promise<void> {
   try {
+    // If jobId provided, check if we already notified
+    if (jobId) {
+      const alreadyNotified = await hasNotifiedForJob(jobId);
+      if (alreadyNotified) {
+        console.log(`⏭️ Skipping notification for job ${jobId} - already sent`);
+        return;
+      }
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '❌ Dream Generation Failed',
         body: 'We couldn\'t generate your dream. Your credit has been restored. Please try again.',
-        data: { type: 'video_failed' },
+        data: { type: 'video_failed', jobId: jobId || '' },
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.HIGH,
       },
       trigger: null,
     });
-    console.log('✅ Local notification sent: Video failed');
+
+    console.log(`✅ Local notification sent: Video failed${jobId ? ` (job: ${jobId})` : ''}`);
+
+    // Mark as notified
+    if (jobId) {
+      await markJobAsNotified(jobId);
+    }
   } catch (error) {
     console.error('❌ Failed to send local notification:', error);
   }

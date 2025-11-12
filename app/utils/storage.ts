@@ -35,8 +35,21 @@ export const STORAGE_KEYS = {
 export const saveDream = async (dream: DreamItem): Promise<void> => {
   try {
     const existingDreams = await getDreams();
-    const updatedDreams = [dream, ...existingDreams];
-    await AsyncStorage.setItem(STORAGE_KEYS.DREAMS, JSON.stringify(updatedDreams));
+
+    // 🔥 Check for duplicates by ID before adding
+    const existingIndex = existingDreams.findIndex(d => d.id === dream.id);
+
+    if (existingIndex !== -1) {
+      // Dream with this ID already exists - update it instead of creating duplicate
+      console.log(`🔄 Updating existing dream: ${dream.id}`);
+      existingDreams[existingIndex] = dream;
+      await AsyncStorage.setItem(STORAGE_KEYS.DREAMS, JSON.stringify(existingDreams));
+    } else {
+      // New dream - add to beginning of array
+      console.log(`✅ Saving new dream: ${dream.id}`);
+      const updatedDreams = [dream, ...existingDreams];
+      await AsyncStorage.setItem(STORAGE_KEYS.DREAMS, JSON.stringify(updatedDreams));
+    }
   } catch (error) {
     console.error('Failed to save dream:', error);
     throw error;

@@ -20,7 +20,7 @@ interface ExpoPushErrorTicket {
 type ExpoPushTicket = ExpoPushSuccessTicket | ExpoPushErrorTicket;
 
 interface ExpoPushResponse {
-  data: ExpoPushTicket[];
+  data: ExpoPushTicket[] | ExpoPushTicket;
 }
 
 /**
@@ -88,38 +88,54 @@ export async function sendPushNotification(
     const result: ExpoPushResponse = await response.json();
     console.log(`📬 Expo API response:`, JSON.stringify(result, null, 2));
 
-    // Check the ticket status
-    if (result.data && result.data.length > 0) {
-      const ticket = result.data[0];
+    // Expo API returns { "data": { "status": "ok", ... } } or { "data": [{ "status": "ok", ... }] }
+    // Handle both single object and array response formats
+    let ticket: ExpoPushTicket | null = null;
 
-      if (ticket.status === 'ok') {
-        console.log(`✅ Notification sent successfully! Ticket ID: ${ticket.id}`);
-        return true;
-      } else if (ticket.status === 'error') {
-        console.error(`❌ Expo push error: ${ticket.message}`);
-
-        // Handle device not registered error
-        if (ticket.details?.error === 'DeviceNotRegistered') {
-          console.log(`🗑️ Device not registered, removing invalid token for user ${userId}`);
-          try {
-            await userRef.update({
-              pushToken: admin.firestore.FieldValue.delete(),
-            });
-          } catch (updateError) {
-            console.error('Failed to remove invalid token:', updateError);
-          }
-        }
-
-        // Handle rate limiting
-        if (ticket.details?.error === 'MessageRateExceeded') {
-          console.warn(`⚠️ Rate limit exceeded for user ${userId}. Will retry later.`);
-        }
-
-        return false;
+    if (result.data) {
+      // Check if data is an array
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        ticket = result.data[0];
+      }
+      // Check if data is a single object with status
+      else if (typeof result.data === 'object' && 'status' in result.data) {
+        ticket = result.data as ExpoPushTicket;
       }
     }
 
-    console.warn(`⚠️ Unexpected Expo API response format`);
+    if (!ticket) {
+      console.warn(`⚠️ Unexpected Expo API response format:`, result);
+      return false;
+    }
+
+    // Check ticket status
+    if (ticket.status === 'ok') {
+      console.log(`✅ Notification sent successfully! Ticket ID: ${ticket.id}`);
+      return true;
+    } else if (ticket.status === 'error') {
+      console.error(`❌ Expo push error: ${ticket.message}`);
+
+      // Handle device not registered error
+      if (ticket.details?.error === 'DeviceNotRegistered') {
+        console.log(`🗑️ Device not registered, removing invalid token for user ${userId}`);
+        try {
+          await userRef.update({
+            pushToken: admin.firestore.FieldValue.delete(),
+          });
+        } catch (updateError) {
+          console.error('Failed to remove invalid token:', updateError);
+        }
+      }
+
+      // Handle rate limiting
+      if (ticket.details?.error === 'MessageRateExceeded') {
+        console.warn(`⚠️ Rate limit exceeded for user ${userId}. Will retry later.`);
+      }
+
+      return false;
+    }
+
+    console.warn(`⚠️ Unknown ticket status: ${(ticket as any).status}`);
     return false;
 
   } catch (error: any) {
