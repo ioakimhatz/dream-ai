@@ -27,6 +27,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { deleteDream, getDreams, type DreamItem } from '../utils/storage';
+import { useAuth } from '../contexts/AuthContext';
+import { syncDreamsFromFirestore } from '../services/syncService';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -468,6 +470,7 @@ function VideoPlayerModal({
 }
 
 export default function LibraryScreen() {
+  const { user } = useAuth();
   const [items, setItems] = useState<DreamItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDream, setSelectedDream] = useState<DreamItem | null>(null);
@@ -480,12 +483,18 @@ export default function LibraryScreen() {
 
   const load = useCallback(async () => {
     try {
+      // 🔥 CRITICAL: Sync from Firestore BEFORE loading from AsyncStorage
+      // This ensures we catch any videos that completed while app was closed
+      if (user) {
+        await syncDreamsFromFirestore(user.id);
+      }
+
       const list = await getDreams();
       setItems([...list].sort((a, b) => b.createdAt - a.createdAt));
     } catch (e) {
       console.error('Failed to load dreams', e);
     }
-  }, []);
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {

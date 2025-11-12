@@ -40,6 +40,7 @@ import {
   sendVideoFailedNotification,
   saveFCMToken,
 } from '../utils/notificationService';
+import { syncDreamsFromFirestore } from '../services/syncService';
 
 import { SubscriptionModal } from '@/components/SubscriptionModal';
 import { BlurredDreamPreview } from '@/components/BlurredDreamPreview';
@@ -212,8 +213,19 @@ export default function HomeScreen() {
       }
     };
 
+    const syncOnMount = async () => {
+      try {
+        // 🔥 CRITICAL: Sync dreams on mount to catch any videos that completed while app was closed
+        console.log('🔄 [index.tsx] Syncing dreams on mount...');
+        await syncDreamsFromFirestore(user.id);
+      } catch (error) {
+        console.error('Failed to sync dreams on mount:', error);
+      }
+    };
+
     if (user) {
       setupNotifications();
+      syncOnMount();
     }
   }, [user]);
 
@@ -315,7 +327,19 @@ export default function HomeScreen() {
           stopRecording();
         }
       } else if (nextAppState === 'active') {
-        console.log('📱 App came to foreground, checking for completed jobs...');
+        console.log('📱 App came to foreground, syncing dreams...');
+
+        // 🔥 CRITICAL: Sync dreams when app comes to foreground
+        // This catches any videos that completed while app was in background
+        if (user) {
+          try {
+            await syncDreamsFromFirestore(user.id);
+          } catch (error) {
+            console.error('Failed to sync dreams on foreground:', error);
+          }
+        }
+
+        console.log('📱 Checking for active generation jobs...');
 
         if (activeJobId && isGenerating) {
           console.log(`🔍 Checking status of job ${activeJobId}...`);
@@ -385,7 +409,7 @@ export default function HomeScreen() {
     return () => {
       subscription.remove();
     };
-  }, [recording, activeJobId, isGenerating, transcript]);
+  }, [recording, activeJobId, isGenerating, transcript, user]);
 
   useEffect(() => {
     return () => {
