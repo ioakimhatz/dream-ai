@@ -1,8 +1,30 @@
-// functions/src/utils/sendNotification.ts - FCM Push Notifications
+// functions/src/utils/sendNotification.ts - Expo Push Notifications
 import * as admin from 'firebase-admin';
 
 /**
- * Send FCM push notification to a specific user
+ * Expo Push Notification API response types
+ */
+interface ExpoPushSuccessTicket {
+  status: 'ok';
+  id: string;
+}
+
+interface ExpoPushErrorTicket {
+  status: 'error';
+  message: string;
+  details?: {
+    error?: 'DeviceNotRegistered' | 'InvalidCredentials' | 'MessageTooBig' | 'MessageRateExceeded';
+  };
+}
+
+type ExpoPushTicket = ExpoPushSuccessTicket | ExpoPushErrorTicket;
+
+interface ExpoPushResponse {
+  data: ExpoPushTicket[];
+}
+
+/**
+ * Send push notification to a specific user using Expo Push Service
  */
 export async function sendPushNotification(
   userId: string,
@@ -11,7 +33,7 @@ export async function sendPushNotification(
   data?: Record<string, string>
 ): Promise<boolean> {
   try {
-    // Fetch user's FCM token from Firestore
+    // Fetch user's Expo Push Token from Firestore
     const userRef = admin.firestore().collection('users').doc(userId);
     const userDoc = await userRef.get();
 
@@ -28,57 +50,84 @@ export async function sendPushNotification(
       return false;
     }
 
-    console.log(`📱 Sending notification to user ${userId}...`);
+    // Validate it's an Expo Push Token
+    if (!pushToken.startsWith('ExponentPushToken[') && !pushToken.startsWith('ExpoPushToken[')) {
+      console.log(`⚠️ Invalid Expo Push Token format for user ${userId}: ${pushToken.substring(0, 20)}...`);
+      return false;
+    }
 
-    // Send FCM notification
-    const message: admin.messaging.Message = {
-      token: pushToken,
-      notification: {
-        title,
-        body,
-      },
+    console.log(`📱 Sending Expo notification to user ${userId}...`);
+    console.log(`📱 Token: ${pushToken.substring(0, 30)}...`);
+
+    // Prepare Expo Push Notification payload
+    const message = {
+      to: pushToken,
+      title,
+      body,
       data: data || {},
-      android: {
-        priority: 'high',
-        notification: {
-          channelId: 'video-generation',
-          priority: 'high',
-          sound: 'default',
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            alert: {
-              title,
-              body,
-            },
-            sound: 'default',
-            badge: 1,
-          },
-        },
-      },
+      sound: 'default',
+      priority: 'high',
+      channelId: 'video-generation', // Android notification channel
+      badge: 1,
     };
 
-    const response = await admin.messaging().send(message);
-    console.log(`✅ Notification sent successfully:`, response);
-    return true;
+    // Send to Expo Push Notification Service
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Expo API responded with status ${response.status}: ${response.statusText}`);
+    }
+
+    const result: ExpoPushResponse = await response.json();
+    console.log(`📬 Expo API response:`, JSON.stringify(result, null, 2));
+
+    // Check the ticket status
+    if (result.data && result.data.length > 0) {
+      const ticket = result.data[0];
+
+      if (ticket.status === 'ok') {
+        console.log(`✅ Notification sent successfully! Ticket ID: ${ticket.id}`);
+        return true;
+      } else if (ticket.status === 'error') {
+        console.error(`❌ Expo push error: ${ticket.message}`);
+
+        // Handle device not registered error
+        if (ticket.details?.error === 'DeviceNotRegistered') {
+          console.log(`🗑️ Device not registered, removing invalid token for user ${userId}`);
+          try {
+            await userRef.update({
+              pushToken: admin.firestore.FieldValue.delete(),
+            });
+          } catch (updateError) {
+            console.error('Failed to remove invalid token:', updateError);
+          }
+        }
+
+        // Handle rate limiting
+        if (ticket.details?.error === 'MessageRateExceeded') {
+          console.warn(`⚠️ Rate limit exceeded for user ${userId}. Will retry later.`);
+        }
+
+        return false;
+      }
+    }
+
+    console.warn(`⚠️ Unexpected Expo API response format`);
+    return false;
 
   } catch (error: any) {
     console.error(`❌ Failed to send notification to user ${userId}:`, error);
 
-    // If token is invalid, remove it from Firestore
-    if (error.code === 'messaging/invalid-registration-token' ||
-        error.code === 'messaging/registration-token-not-registered') {
-      console.log(`🗑️ Removing invalid token for user ${userId}`);
-      try {
-        const userRef = admin.firestore().collection('users').doc(userId);
-        await userRef.update({
-          pushToken: admin.firestore.FieldValue.delete(),
-        });
-      } catch (updateError) {
-        console.error('Failed to remove invalid token:', updateError);
-      }
+    // Log network errors
+    if (error.name === 'FetchError' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      console.error(`🌐 Network error while sending notification: ${error.message}`);
     }
 
     return false;
