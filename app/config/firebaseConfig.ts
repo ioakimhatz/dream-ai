@@ -37,5 +37,8 @@ try {
 // Initialize Firestore
 export const firestore = getFirestore(app);
 
+// Export as 'db' for consistency with Cloud Functions
+export const db = firestore;
+
 export { auth };
 export default app;

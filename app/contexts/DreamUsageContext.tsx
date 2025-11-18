@@ -1,4 +1,4 @@
-// app/contexts/DreamUsageContext.tsx - FIXED: Proper user isolation and subscription cleanup
+// app/contexts/DreamUsageContext.tsx - FIXED: Proper user isolation and subscription cleanup + Firestore sync
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Alert } from 'react-native';
@@ -7,6 +7,8 @@ import Purchases, {
   PurchasesPackage
 } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
+import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
 
 interface DreamUsage {
   used: number;
@@ -76,6 +78,59 @@ const PLAN_DETAILS = {
 };
 
 const DreamUsageContext = createContext<DreamUsageContextType | null>(null);
+
+// 🔥 NEW: Firestore sync helpers
+async function loadUsageFromFirestore(userId: string): Promise<DreamUsage | null> {
+  try {
+    console.log('📥 Loading dream usage from Firestore for user:', userId);
+    const usageRef = doc(db, 'dreamUsage', userId);
+    const usageSnap = await getDoc(usageRef);
+
+    if (usageSnap.exists()) {
+      const data = usageSnap.data();
+      const usage: DreamUsage = {
+        used: data.used || 0,
+        total: data.total || 0,
+        resetDate: data.resetDate?.toDate?.()?.toISOString() || new Date().toISOString(),
+        planId: data.planId || null,
+      };
+      console.log('✅ Loaded from Firestore:', usage);
+      return usage;
+    }
+
+    console.log('ℹ️ No Firestore usage found for user');
+    return null;
+  } catch (error) {
+    console.error('❌ Error loading from Firestore:', error);
+    return null;
+  }
+}
+
+async function syncUsageToFirestore(userId: string, usage: DreamUsage): Promise<void> {
+  try {
+    console.log('💾 Syncing dream usage to Firestore:', usage);
+    const usageRef = doc(db, 'dreamUsage', userId);
+
+    await setDoc(usageRef, {
+      used: usage.used,
+      total: usage.total,
+      resetDate: Timestamp.fromDate(new Date(usage.resetDate)),
+      planId: usage.planId,
+      updatedAt: Timestamp.now(),
+      subscription: {
+        period: usage.planId?.includes('weekly') ? 'weekly' :
+                usage.planId?.includes('monthly') ? 'monthly' : null,
+        dreams: usage.total,
+        isActive: usage.total > 0,
+      },
+    }, { merge: true });
+
+    console.log('✅ Synced to Firestore successfully');
+  } catch (error) {
+    console.error('❌ Error syncing to Firestore:', error);
+    // Don't throw - fallback to AsyncStorage
+  }
+}
 
 export function DreamUsageProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -244,6 +299,10 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         };
         setDreamUsage(freeUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
+
+        // 🔥 NEW: Sync to Firestore
+        await syncUsageToFirestore(user.id, freeUsage);
+
         return;
       }
 
@@ -335,6 +394,12 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         };
         setDreamUsage(freeUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
+
+        // 🔥 NEW: Sync to Firestore
+        if (user) {
+          await syncUsageToFirestore(user.id, freeUsage);
+        }
+
         console.log('✅ Set to FREE plan: 0 dreams available');
       }
     } catch (error) {
@@ -353,6 +418,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       };
       setDreamUsage(freeUsage);
       await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
+
+      // 🔥 NEW: Sync to Firestore
+      if (user) {
+        await syncUsageToFirestore(user.id, freeUsage);
+      }
     } finally {
       setIsLoadingSubscription(false);
     }
@@ -407,14 +477,33 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
     setDreamUsage(newUsage);
     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
+
+    // 🔥 NEW: Sync to Firestore as source of truth
+    if (user) {
+      await syncUsageToFirestore(user.id, newUsage);
+    }
+
     return newUsage;
   };
 
   const loadDreamUsage = async (): Promise<DreamUsage> => {
     try {
+      // 🔥 CRITICAL: Try Firestore FIRST (source of truth)
+      if (user) {
+        const firestoreUsage = await loadUsageFromFirestore(user.id);
+        if (firestoreUsage) {
+          // Update local cache
+          await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(firestoreUsage));
+          setDreamUsage(firestoreUsage);
+          return firestoreUsage;
+        }
+      }
+
+      // Fallback to AsyncStorage if Firestore unavailable (offline mode)
       const stored = await AsyncStorage.getItem(DREAM_USAGE_KEY);
       if (stored) {
         const usage = JSON.parse(stored);
+        console.log('⚠️ Using cached AsyncStorage (Firestore unavailable)');
         setDreamUsage(usage);
         return usage;
       }
@@ -443,6 +532,12 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     setSubscription(null);
     await AsyncStorage.removeItem(DREAM_USAGE_KEY);
     await AsyncStorage.removeItem(SUBSCRIPTION_KEY);
+
+    // 🔥 NEW: Sync to Firestore
+    if (user) {
+      await syncUsageToFirestore(user.id, defaultUsage);
+    }
+
     console.log('✅ Usage reset to FREE plan');
   };
 
@@ -518,6 +613,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     setDreamUsage(newUsage);
     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
 
+    // 🔥 NEW: Sync to Firestore (NOTE: This will be removed when server-side deduction is implemented)
+    if (user) {
+      await syncUsageToFirestore(user.id, newUsage);
+    }
+
     console.log(`✅ Dream used: ${newUsage.used}/${newUsage.total}`);
     return true;
   };
@@ -534,6 +634,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
         setDreamUsage(refundedUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(refundedUsage));
+
+        // 🔥 NEW: Sync to Firestore
+        if (user) {
+          await syncUsageToFirestore(user.id, refundedUsage);
+        }
 
         console.log(`✅ Dream refunded: ${refundedUsage.used}/${refundedUsage.total}`);
       } else {
@@ -777,6 +882,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
                     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
                     await AsyncStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(newSub));
+
+                    // 🔥 NEW: Sync to Firestore
+                    if (user) {
+                      await syncUsageToFirestore(user.id, newUsage);
+                    }
 
                     console.log('✅ Plan changed and dreams reset:', newUsage);
 

@@ -1,18 +1,68 @@
-rules_version='2'
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2025, 12, 2);
+
+    // 🔥 CRITICAL: Dream Usage Collection (Server-Side Only Writes)
+    // Users can READ their own usage, but ONLY Cloud Functions can WRITE
+    match /dreamUsage/{userId} {
+      // Allow users to read their own dream usage
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // ❌ BLOCK all client writes - only Cloud Functions can write
+      allow write: if false;
     }
+
+    // 🔥 CRITICAL: Dream Generations Audit Trail (Server-Side Only Writes)
+    // Users can READ their own generations, but ONLY Cloud Functions can WRITE
+    match /dreamGenerations/{jobId} {
+      // Allow users to read their own dream generations
+      allow read: if request.auth != null &&
+                     request.auth.uid == resource.data.userId;
+
+      // ❌ BLOCK all client writes - only Cloud Functions can write
+      allow write: if false;
+    }
+
+    // Dream Jobs Collection (existing functionality)
+    match /dreamJobs/{jobId} {
+      // Users can read their own jobs
+      allow read: if request.auth != null &&
+                     request.auth.uid == resource.data.userId;
+
+      // Users can create jobs for themselves
+      allow create: if request.auth != null &&
+                       request.auth.uid == request.resource.data.userId;
+
+      // Users cannot update or delete jobs (Cloud Functions handle this)
+      allow update, delete: if false;
+    }
+
+    // User Dreams Collection (saved videos)
+    match /userDreams/{userId}/dreams/{dreamId} {
+      // Users can read their own dreams
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Users can create/update/delete their own dreams
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // FCM Tokens Collection (for push notifications)
+    match /fcmTokens/{userId} {
+      // Users can read/write their own FCM token
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // User Profiles Collection (if you have one)
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Users can create/update their own profile
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ❌ DENY ALL other collections by default (secure by default)
+    // If you need to add new collections, explicitly add rules above
   }
 }

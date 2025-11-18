@@ -32,6 +32,8 @@ import { removeBackground } from '../utils/backgroundRemoval';
 import { analyzePromptStrength } from '../utils/promptValidator';
 import { saveDream } from '../utils/storage';
 import { transcribeAudio } from '../utils/transcribe';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
 import {
   registerForPushNotifications,
   sendVideoReadyNotification,
@@ -230,7 +232,6 @@ export default function HomeScreen() {
   const {
     dreamUsage,
     subscription,
-    useDream,
     refundDream,
     offerings,
     purchaseSubscription,
@@ -774,10 +775,48 @@ export default function HomeScreen() {
       return;
     }
 
-    const ok = await useDream();
-    if (!ok) return;
+    // 🔥 NEW: Check if user has dreams available (read from Firestore - server is source of truth)
+    // NOTE: We don't deduct here anymore - Cloud Function will handle deduction
+    try {
+      if (!user) {
+        Alert.alert('Error', 'Please sign in to generate dreams');
+        return;
+      }
 
-    await proceedWithGeneration();
+      console.log('🔍 Checking dream availability from Firestore...');
+      const usageRef = doc(db, 'dreamUsage', user.id);
+      const usageSnap = await getDoc(usageRef);
+
+      if (!usageSnap.exists()) {
+        Alert.alert('Error', 'Unable to verify dream availability. Please try again.');
+        return;
+      }
+
+      const usageData = usageSnap.data();
+      const used = usageData.used || 0;
+      const total = usageData.total || 0;
+
+      console.log(`📊 Dream availability check: ${used}/${total}`);
+
+      if (used >= total) {
+        Alert.alert(
+          'Dream Limit Reached',
+          `You've used all ${total} dreams for this period. Next reset: ${new Date(usageData.resetDate?.toDate?.() || usageData.resetDate).toLocaleDateString()}`,
+          [{ text: 'OK', style: 'cancel' }]
+        );
+        return;
+      }
+
+      console.log('✅ User has dreams available - proceeding to generation');
+      console.log('ℹ️ Server will deduct dream when job starts');
+
+      // Proceed with generation - Cloud Function will deduct the dream
+      await proceedWithGeneration();
+
+    } catch (error) {
+      console.error('❌ Error checking dream availability:', error);
+      Alert.alert('Error', 'Unable to verify dream availability. Please try again.');
+    }
   };
 
   const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
@@ -821,15 +860,43 @@ export default function HomeScreen() {
         setShowPaywall(false);
         setShowBlurredPreview(false);
 
-        proceedWithGeneration();
+        // 🔥 NEW: After purchase, verify dreams are available in Firestore
+        // The subscription should have been synced, but double-check to be safe
+        try {
+          if (!user) return;
 
-        setTimeout(() => {
-          Alert.alert(
-            '🎉 Success!',
-            'Generating your dream cinema...',
-            [{ text: 'Great!', style: 'default' }]
-          );
-        }, 500);
+          console.log('🔍 Verifying dreams after purchase...');
+          const usageRef = doc(db, 'dreamUsage', user.id);
+          const usageSnap = await getDoc(usageRef);
+
+          if (usageSnap.exists()) {
+            const usageData = usageSnap.data();
+            const used = usageData.used || 0;
+            const total = usageData.total || 0;
+
+            console.log(`📊 Post-purchase dream check: ${used}/${total}`);
+
+            if (used >= total) {
+              Alert.alert('Error', 'Unable to verify dream availability. Please try again in a moment.');
+              return;
+            }
+          }
+
+          console.log('✅ Dreams verified - proceeding with generation');
+          await proceedWithGeneration();
+
+          setTimeout(() => {
+            Alert.alert(
+              '🎉 Success!',
+              'Generating your dream cinema...',
+              [{ text: 'Great!', style: 'default' }]
+            );
+          }, 500);
+
+        } catch (error) {
+          console.error('❌ Error verifying dreams after purchase:', error);
+          Alert.alert('Error', 'Purchase successful! Please tap Generate again to create your dream.');
+        }
       }
     } finally {
       setIsPurchasing(false);
