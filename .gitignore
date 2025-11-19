@@ -38,3 +38,12 @@ yarn-error.*
 
 app-example
 .vercel
+.env
+.env.local
+.env.production
+.env.development
+.env.test
+functions/.env
+functions/.env.local
+**/.env
+**/.env.local
