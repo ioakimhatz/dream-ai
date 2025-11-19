@@ -121,8 +121,8 @@ export async function processDreamJob(
 
     console.log(`✅ Generation complete!`);
 
-    // 🔥 FIXED: Use coverUrl (which is the first scene image) as thumbnail
-    const thumbnailUrl = result.coverUrl || null;
+    // 🔥 FIXED: Use thumbnailUrl from generation result (last frame for dreamcore, first scene for standard)
+    const thumbnailUrl = result.thumbnailUrl || result.coverUrl || null;
     console.log(`🖼️ Thumbnail URL: ${thumbnailUrl}`);
 
     await jobRef.update({
@@ -130,7 +130,7 @@ export async function processDreamJob(
       progress: 100,
       currentStep: 'Completed!',
       videoUrl: result.videoUrls[0],
-      thumbnailUrl: thumbnailUrl,  // ✅ Use scene image as thumbnail
+      thumbnailUrl: thumbnailUrl,  // ✅ Use last frame (dreamcore) or first scene (standard) as thumbnail
       updatedAt: Date.now(),
       metadata: {
         videoUrls: result.videoUrls,

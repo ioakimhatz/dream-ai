@@ -99,6 +99,7 @@ export async function generate3ClipDreamCinemaParallel(
   videoUrls: string[];
   stitchedVideoUrl: string;
   coverUrl: string | null;
+  thumbnailUrl?: string | null;
   totalCost: number;
   generationTime: number;
 }> {
@@ -165,6 +166,7 @@ export async function generate3ClipDreamCinemaParallel(
     videoUrls,
     stitchedVideoUrl,
     coverUrl,
+    thumbnailUrl: coverUrl, // Use first clip's cover as thumbnail
     totalCost: 0,
     generationTime,
   };

@@ -27,6 +27,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext';
 import { SubscriptionModal } from '@/components/SubscriptionModal';
+import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
 
 // 🔥 NEW: Import Firebase functions for account deletion
 import { deleteUser } from 'firebase/auth';
@@ -65,20 +66,27 @@ export default function SettingsScreen() {
   } = useDreamUsage();
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Notifications.getPermissionsAsync();
-        setNotificationPermissionStatus(status);
-
-        const saved = await AsyncStorage.getItem('notifications');
-        if (saved !== null) {
-          setNotificationsEnabled(JSON.parse(saved));
-        }
-      } catch (e) {
-        console.error('Failed to load settings:', e);
-      }
-    })();
+    loadNotificationState();
   }, []);
+
+  const loadNotificationState = async () => {
+    try {
+      // Check OS permissions
+      const { status } = await Notifications.getPermissionsAsync();
+      setNotificationPermissionStatus(status);
+
+      // Check user preference
+      const preference = await AsyncStorage.getItem('notifications_enabled');
+
+      // Only enable if BOTH permission granted AND user hasn't explicitly disabled it
+      const enabled = status === 'granted' && preference !== 'false';
+      setNotificationsEnabled(enabled);
+
+      console.log('📱 Notification state loaded:', { status, preference, enabled });
+    } catch (e) {
+      console.error('Failed to load notification settings:', e);
+    }
+  };
 
   useEffect(() => {
     if (user?.photo) setUserAvatar(user.photo);
@@ -87,46 +95,64 @@ export default function SettingsScreen() {
   const updateNotifications = async (value: boolean) => {
     try {
       if (value) {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
+        // User wants to enable notifications
+        console.log('📱 Enabling notifications...');
 
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
+        // Register for push notifications (handles permission request)
+        const token = await registerForPushNotifications();
 
-        if (finalStatus !== 'granted') {
+        if (token) {
+          // Successfully registered - save token if user is signed in
+          if (user?.id) {
+            try {
+              await saveFCMToken(user.id, token);
+              console.log('✅ Push token saved for user');
+            } catch (error) {
+              console.warn('⚠️ Failed to save push token, continuing anyway');
+            }
+          }
+
+          // Save preference
+          await AsyncStorage.setItem('notifications_enabled', 'true');
+          setNotificationsEnabled(true);
+          setNotificationPermissionStatus('granted');
+
           Alert.alert(
-            'Permission Required',
-            'Please enable notifications in your device settings to receive dream reminders.',
+            '✅ Notifications Enabled',
+            'You will now receive notifications when your dream videos are ready!'
+          );
+          console.log('✅ Notifications enabled successfully');
+        } else {
+          // Permission denied
+          setNotificationsEnabled(false);
+          Alert.alert(
+            'Permission Denied',
+            'Please enable notifications in your device settings to receive dream updates.',
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Open Settings', onPress: () => Linking.openSettings() }
             ]
           );
-          return;
+          console.log('❌ Notification permission denied');
         }
-
-        setNotificationPermissionStatus(finalStatus);
-        setNotificationsEnabled(true);
-        await AsyncStorage.setItem('notifications', JSON.stringify(true));
-
-        await Notifications.setNotificationHandler({
-          handleNotification: async () => ({
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldShowBanner: true,
-            shouldShowList: true,
-            shouldSetBadge: true,
-          }),
-        });
       } else {
+        // User wants to disable notifications
+        console.log('📱 Disabling notifications...');
+        await AsyncStorage.setItem('notifications_enabled', 'false');
         setNotificationsEnabled(false);
-        await AsyncStorage.setItem('notifications', JSON.stringify(false));
+
+        Alert.alert(
+          'Notifications Disabled',
+          'You will no longer receive notifications. You can re-enable them anytime in Settings.'
+        );
+        console.log('✅ Notifications disabled');
       }
     } catch (e) {
-      console.error('Failed to update notifications:', e);
-      Alert.alert('Error', 'Failed to update notification settings');
+      console.error('❌ Failed to update notifications:', e);
+      Alert.alert(
+        'Error',
+        'Failed to update notification settings. Please try again.'
+      );
     }
   };
 

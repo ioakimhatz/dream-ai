@@ -1,10 +1,13 @@
 // functions/src/utils/generateVideoKling.ts - HYBRID: Smart cleaning + Scene chaining + Optional faces
 import * as FileSystem from "./fileSystem";
 import { getScenePlan } from "./enhancePrompt";
-import { stitchWithCloudinary } from "./cloudinaryStitch";
+import { stitchWithCloudinary, uploadImage } from "./cloudinaryStitch";
 import { generateSceneImage } from "./sceneImageGenerator";
 import { addAudioToVideo } from "./addAudioToVideo";
 import { processPromptForGeneration } from "./smartPromptProcessor";
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import * as fs from 'fs';
 
 // 🔥 Duration constants for different clip types
 const DURATION_SHORT = "5" as "5";   // 5 seconds - for ending clips
@@ -16,9 +19,62 @@ const USE_SCENE_IMAGE_GEN = process.env.EXPO_PUBLIC_USE_SCENE_IMAGE_GEN === "1";
 const ENABLE_AUDIO = process.env.EXPO_PUBLIC_ENABLE_AUDIO === "1";
 const MAX_RETRIES = 2;
 
-const KLING_NEGATIVE_PROMPT = 
+const KLING_NEGATIVE_PROMPT =
   "blur, distort, low quality, warping, morphing, artifacts, " +
   "flickering, choppy motion, face distortion, unnatural physics";
+
+// Set FFmpeg path for frame extraction
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+}
+
+/**
+ * Extracts the last frame from a video as a JPEG image and uploads to Cloudinary
+ * @param videoPath Local path to the video file
+ * @returns Cloudinary URL of the uploaded image
+ */
+async function extractLastFrameAsImage(videoPath: string): Promise<string> {
+  console.log('📸 Extracting last frame from:', videoPath);
+
+  // Extract last frame using FFmpeg
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(videoPath)
+      .screenshots({
+        count: 1,
+        filename: 'lastframe.jpg',
+        folder: '/tmp/dream-ai',
+        timemarks: ['99%'] // Extract from 99% of video duration (near end)
+      })
+      .on('end', () => {
+        console.log('✅ Last frame extracted');
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('❌ FFmpeg frame extraction error:', err);
+        reject(err);
+      });
+  });
+
+  const extractedFramePath = '/tmp/dream-ai/lastframe.jpg';
+
+  // Verify the file was created
+  if (!fs.existsSync(extractedFramePath)) {
+    throw new Error('Frame extraction failed - file not created');
+  }
+
+  console.log('☁️ Uploading last frame to Cloudinary...');
+  const lastFrameImageUrl = await uploadImage(extractedFramePath);
+  console.log('✅ Last frame uploaded:', lastFrameImageUrl);
+
+  // Clean up the extracted frame
+  try {
+    fs.unlinkSync(extractedFramePath);
+  } catch (err) {
+    console.warn('⚠️ Failed to cleanup extracted frame:', err);
+  }
+
+  return lastFrameImageUrl;
+}
 
 function falKey(): string {
   const k =
@@ -402,13 +458,16 @@ async function klingTextToVideo10s(prompt: string): Promise<{
       lastFrameUrl = j.video.end_frame;
       console.log(`✅ Last frame URL from API: ${lastFrameUrl}`);
     } else {
-      // If API doesn't provide last frame, we'll use the video URL itself
-      // Kling's image-to-video can accept video URLs and extract the last frame automatically
-      lastFrameUrl = remote;
-      console.log(`ℹ️ Using video URL as last frame reference: ${lastFrameUrl}`);
+      // ✅ FIX: Extract last frame as IMAGE (not video URL)
+      // Kling i2v expects a JPEG/PNG image, not a video file
+      console.log('📸 API did not provide last frame - extracting from video...');
+      lastFrameUrl = await extractLastFrameAsImage(dl.uri);
+      console.log(`✅ Last frame extracted and uploaded: ${lastFrameUrl}`);
     }
   } catch (error) {
-    console.warn('⚠️ Failed to extract last frame URL, will use video URL:', error);
+    console.error('❌ Failed to extract last frame as image:', error);
+    // Fallback: try with video URL (may still fail with 10MB error)
+    console.warn('⚠️ Falling back to video URL (may exceed 10MB limit)');
     lastFrameUrl = remote;
   }
 
@@ -453,6 +512,7 @@ async function generate2ClipDreamcore(
   videoUrls: string[];
   stitchedVideoUrl: string;
   coverUrl: string | null;
+  thumbnailUrl: string | null;
   totalCost: number;
   generationTime: number;
 }> {
@@ -511,6 +571,9 @@ async function generate2ClipDreamcore(
 
   console.log('✅ 10s clip generated');
   console.log(`📸 Last frame URL: ${clip1.lastFrameUrl ? 'Available' : 'Not available'}`);
+
+  // Save last frame for thumbnail
+  const thumbnailUrl = clip1.lastFrameUrl;
 
   // STEP 4: Generate 5s clip (ending) - method depends on content type
   onProgress?.(3, 7, "Generating ending clip (5s)...");
@@ -638,6 +701,7 @@ async function generate2ClipDreamcore(
     videoUrls: localClips,
     stitchedVideoUrl,
     coverUrl,
+    thumbnailUrl,
     totalCost,
     generationTime: dt,
   };
@@ -651,6 +715,7 @@ export async function generate3ClipKlingParallel(
   videoUrls: string[];
   stitchedVideoUrl: string;
   coverUrl: string | null;
+  thumbnailUrl?: string | null;
   totalCost: number;
   generationTime: number;
 }> {
@@ -878,6 +943,7 @@ export async function generate3ClipKlingParallel(
     videoUrls: localClips,
     stitchedVideoUrl,
     coverUrl,
+    thumbnailUrl: coverUrl, // Use first scene image as thumbnail
     totalCost,
     generationTime: dt,
   };

@@ -26,6 +26,7 @@ interface CharacterRefs {
 export interface GenerationResult {
   videoUrls: string[];
   coverUrl: string | null;
+  thumbnailUrl?: string | null;
   refundUser?: boolean;
   partialSuccess?: boolean;
 }
@@ -156,6 +157,7 @@ export async function generateDreamVideo(
     return {
       videoUrls: [result.stitchedVideoUrl],
       coverUrl: result.coverUrl,
+      thumbnailUrl: result.thumbnailUrl || result.coverUrl,
       refundUser: false,
     };
   } catch (err: any) {
