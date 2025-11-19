@@ -47,6 +47,7 @@ export async function syncDreamsFromFirestore(userId: string): Promise<void> {
         };
         firestoreDreams.push(dreamItem);
         console.log(`  ✅ [syncService] Mapped job ${job.id}: ${job.prompt.substring(0, 50)}...`);
+        console.log(`     📸 thumbnailUrl: ${job.thumbnailUrl ? 'EXISTS' : 'NULL'}`);
       } else {
         console.log(`  ⚠️ [syncService] Skipping job ${job.id} - no videoUrl`);
       }
@@ -71,15 +72,32 @@ export async function syncDreamsFromFirestore(userId: string): Promise<void> {
     });
 
     // Then, add/overwrite with Firestore dreams (they are the source of truth)
+    // 🔥 SMART MERGE: Preserve local thumbnailUrl if Firestore doesn't have one
     let newDreamsCount = 0;
     let updatedDreamsCount = 0;
     firestoreDreams.forEach((dream) => {
-      if (dreamMap.has(dream.id)) {
+      const existing = dreamMap.get(dream.id);
+
+      if (existing) {
+        // Dream exists locally - merge intelligently
+        const merged: DreamItem = {
+          ...dream,  // Use Firestore data as base
+          // 🔥 Preserve local thumbnailUrl if Firestore doesn't have one
+          thumbnailUrl: dream.thumbnailUrl || existing.thumbnailUrl,
+        };
+
+        // 🔍 Debug logging for thumbnail preservation
+        if (!dream.thumbnailUrl && existing.thumbnailUrl) {
+          console.log(`  🔄 [syncService] Preserved local thumbnail for ${dream.id}`);
+        }
+
+        dreamMap.set(dream.id, merged);
         updatedDreamsCount++;
       } else {
+        // New dream from Firestore
+        dreamMap.set(dream.id, dream);
         newDreamsCount++;
       }
-      dreamMap.set(dream.id, dream);
     });
 
     // Step 5: Convert back to array and sort by createdAt (newest first)
