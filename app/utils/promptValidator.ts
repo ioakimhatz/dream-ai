@@ -8,6 +8,14 @@ export interface PromptAnalysis {
   hasAdultContent?: boolean;
 }
 
+/**
+ * Escape special regex characters in a string
+ * Needed because some keywords might contain regex special chars like * or +
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // 🔥 DEDUPLICATION: Track running generations
 const runningGenerations = new Map<string, number>(); // key -> timestamp
 const generationHistory = new Map<string, number[]>(); // userId -> [timestamps]
@@ -341,8 +349,6 @@ const LANGUAGE_KEYWORD_MAP: Record<string, string[]> = {
  * @returns true if adult content detected
  */
 export function detectAdultContent(text: string, userLanguage: string = 'en'): boolean {
-  const lowerText = text.toLowerCase();
-
   // Build keyword list for this specific user
   let keywordsToCheck = [...ENGLISH_EXPLICIT_KEYWORDS]; // Always check English
 
@@ -354,10 +360,14 @@ export function detectAdultContent(text: string, userLanguage: string = 'en'): b
     console.log('🌍 Checking English keywords only');
   }
 
-  // Check each keyword
+  // Check each keyword using word boundaries to avoid false positives
+  // This prevents "mountain" from matching "mounted", "cucumber" from matching "cum", etc.
   const matchedKeywords: string[] = [];
   for (const keyword of keywordsToCheck) {
-    if (lowerText.includes(keyword)) {
+    // Use word boundaries to match whole words only
+    // \b = word boundary (space, punctuation, start/end of string)
+    const regex = new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'i');
+    if (regex.test(text)) {
       matchedKeywords.push(keyword);
     }
   }

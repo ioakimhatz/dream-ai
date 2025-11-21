@@ -5,7 +5,6 @@ import { useLocalSearchParams } from 'expo-router';
 import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as MediaLibrary from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -193,26 +192,16 @@ function VideoPlayerModal({
     try {
       const videoToShare = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
 
-      if (videoToShare.includes('cloudinary.com') || videoToShare.includes('b-cdn.net')) {
-        Alert.alert('Preparing...', 'Downloading video to share');
-
-        const localUri = await downloadVideoLocally(videoToShare, dream.id);
-
-        await Sharing.shareAsync(localUri, {
-          dialogTitle: `Share Dream: ${createShortTitle(dream.prompt)}`,
-          mimeType: 'video/mp4',
-        });
-      } else if (videoToShare.startsWith('file://')) {
-        await Sharing.shareAsync(videoToShare, {
-          dialogTitle: `Share Dream: ${createShortTitle(dream.prompt)}`,
-          mimeType: 'video/mp4',
-        });
-      } else {
-        await Share.share({
-          message: `Check out my dream: "${dream.prompt}" - Created with Dream AI`,
-          url: videoToShare,
-        });
+      if (!videoToShare) {
+        Alert.alert('Error', 'Video URL not available');
+        return;
       }
+
+      // Share Bunny CDN URL directly - instant, no download needed!
+      await Share.share({
+        message: `Check out my dream cinema! 🎬\n\n"${dream.prompt}"\n\nCreated with Dream AI`,
+        url: videoToShare,
+      });
     } catch (error) {
       console.error('Error sharing:', error);
       Alert.alert('Error', 'Failed to share video');
@@ -230,8 +219,7 @@ function VideoPlayerModal({
       const videoToDownload = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
 
       if (videoToDownload.includes('cloudinary.com') || videoToDownload.includes('b-cdn.net')) {
-        Alert.alert('Downloading...', 'Please wait while we save your dream');
-
+        // downloadVideoLocally already handles the download progress
         const localUri = await downloadVideoLocally(videoToDownload, dream!.id);
 
         await MediaLibrary.createAssetAsync(localUri);
