@@ -1,4 +1,4 @@
-// app/contexts/DreamUsageContext.tsx - FIXED: Proper user isolation and subscription cleanup + Firestore sync
+// app/contexts/DreamUsageContext.tsx - DREAM BANK: Simple rollover system (dreams accumulate up to 12)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Alert } from 'react-native';
@@ -15,6 +15,7 @@ interface DreamUsage {
   total: number;
   resetDate: string;
   planId: string | null;
+  rollover: number;  // 🔥 NEW: Accumulated unused dreams (max 12)
 }
 
 interface Subscription {
@@ -49,6 +50,7 @@ interface DreamUsageContextType {
 
 const DREAM_USAGE_KEY = '@dream_usage';
 const SUBSCRIPTION_KEY = '@subscription_info';
+const MAX_ROLLOVER_DREAMS = 12; // 🔥 NEW: Maximum dreams that can accumulate
 
 const PRODUCT_IDS = {
   weekly: 'dream_weekly',
@@ -79,7 +81,7 @@ const PLAN_DETAILS = {
 
 const DreamUsageContext = createContext<DreamUsageContextType | null>(null);
 
-// 🔥 NEW: Firestore sync helpers
+// 🔥 Firestore sync helpers
 async function loadUsageFromFirestore(userId: string): Promise<DreamUsage | null> {
   try {
     console.log('📥 Loading dream usage from Firestore for user:', userId);
@@ -93,6 +95,7 @@ async function loadUsageFromFirestore(userId: string): Promise<DreamUsage | null
         total: data.total || 0,
         resetDate: data.resetDate?.toDate?.()?.toISOString() || new Date().toISOString(),
         planId: data.planId || null,
+        rollover: data.rollover || 0,  // 🔥 NEW: Load rollover
       };
       console.log('✅ Loaded from Firestore:', usage);
       return usage;
@@ -116,10 +119,11 @@ async function syncUsageToFirestore(userId: string, usage: DreamUsage): Promise<
       total: usage.total,
       resetDate: Timestamp.fromDate(new Date(usage.resetDate)),
       planId: usage.planId,
+      rollover: usage.rollover,  // 🔥 NEW: Save rollover
       updatedAt: Timestamp.now(),
       subscription: {
         period: usage.planId?.includes('weekly') ? 'weekly' :
-                usage.planId?.includes('monthly') ? 'monthly' : null,
+          usage.planId?.includes('monthly') ? 'monthly' : null,
         dreams: usage.total,
         isActive: usage.total > 0,
       },
@@ -136,9 +140,10 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   const { user } = useAuth();
   const [dreamUsage, setDreamUsage] = useState<DreamUsage>({
     used: 0,
-    total: 0, // 🔥 FREE PLAN: 0 dreams
+    total: 0,
     resetDate: new Date().toISOString(),
-    planId: null
+    planId: null,
+    rollover: 0  // 🔥 NEW: Initialize rollover
   });
 
   const [subscription, setSubscription] = useState<Subscription | null>(null);
@@ -154,7 +159,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       if (user) {
         console.log('👤 User logged in:', user.id);
 
-        // 🔥 CRITICAL: Clear all subscription/usage data FIRST before checking RevenueCat
         await clearSubscriptionCache();
 
         await loginToRevenueCat(user.id);
@@ -164,14 +168,13 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.log('👤 No user - logging out and clearing data');
         await logoutFromRevenueCat();
         await resetUsage();
-        await clearSubscriptionCache(); // 🔥 NEW: Clear cache on logout
+        await clearSubscriptionCache();
       }
     };
 
     initializeUser();
   }, [user]);
 
-  // 🔥 NEW: Clear subscription cache to prevent cross-account contamination
   const clearSubscriptionCache = async () => {
     try {
       console.log('🗑️ Clearing subscription cache...');
@@ -181,7 +184,8 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         used: 0,
         total: 0,
         resetDate: new Date().toISOString(),
-        planId: null
+        planId: null,
+        rollover: 0  // 🔥 NEW
       });
       console.log('✅ Subscription cache cleared');
     } catch (error) {
@@ -207,7 +211,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     try {
       console.log('🔐 Logging in to RevenueCat with user:', userId);
 
-      // 🔥 IMPORTANT: Invalidate cache before login to prevent old subscriptions
       try {
         await Purchases.invalidateCustomerInfoCache();
         console.log('🗑️ Cache invalidated before login');
@@ -232,7 +235,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         await Purchases.logOut();
         console.log('✅ Logged out from RevenueCat');
 
-        // 🔥 NEW: Clear cache after logout
         try {
           await Purchases.invalidateCustomerInfoCache();
           console.log('🗑️ Cache cleared after logout');
@@ -281,7 +283,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       console.log('🔍 [checkSubscriptionStatus] App User ID:', customerInfo.originalAppUserId);
       console.log('🔍 [checkSubscriptionStatus] Current logged-in user:', user?.id);
 
-      // 🔥 CRITICAL: Verify the subscription belongs to THIS user
       if (customerInfo.originalAppUserId !== user?.id) {
         console.warn('⚠️ RevenueCat user ID mismatch!');
         console.warn(`   RevenueCat user: ${customerInfo.originalAppUserId}`);
@@ -295,12 +296,12 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
           used: 0,
           total: 0,
           resetDate: new Date().toISOString(),
-          planId: null
+          planId: null,
+          rollover: 0  // 🔥 NEW
         };
         setDreamUsage(freeUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
 
-        // 🔥 NEW: Sync to Firestore
         await syncUsageToFirestore(user.id, freeUsage);
 
         return;
@@ -388,14 +389,14 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
         const freeUsage = {
           used: 0,
-          total: 0, // 🔥 FREE PLAN: 0 dreams
+          total: 0,
           resetDate: new Date().toISOString(),
-          planId: null
+          planId: null,
+          rollover: 0  // 🔥 NEW
         };
         setDreamUsage(freeUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
 
-        // 🔥 NEW: Sync to Firestore
         if (user) {
           await syncUsageToFirestore(user.id, freeUsage);
         }
@@ -405,7 +406,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('❌ Error checking subscription:', error);
 
-      // 🔥 On error, default to FREE plan (not cached subscription)
       console.log('⚠️ Error occurred, defaulting to FREE plan');
       setSubscription(null);
       await AsyncStorage.removeItem(SUBSCRIPTION_KEY);
@@ -414,12 +414,12 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         used: 0,
         total: 0,
         resetDate: new Date().toISOString(),
-        planId: null
+        planId: null,
+        rollover: 0  // 🔥 NEW
       };
       setDreamUsage(freeUsage);
       await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(freeUsage));
 
-      // 🔥 NEW: Sync to Firestore
       if (user) {
         await syncUsageToFirestore(user.id, freeUsage);
       }
@@ -428,6 +428,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  // 🔥 NEW: Updated to handle rollover (dreams accumulate up to 12 max)
   const updateDreamLimits = async (planId: string, dreamCount: number, period: 'weekly' | 'monthly') => {
     const currentUsage = await loadDreamUsage();
     const now = new Date();
@@ -454,22 +455,36 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         nextResetDate.setMonth(nextResetDate.getMonth() + 1);
       }
 
+      // 🔥 NEW: Calculate rollover from unused dreams
+      let newRollover = currentUsage.rollover || 0;
+
+      if (shouldReset && !isPlanChange) {
+        // Add unused dreams to rollover
+        const unusedDreams = Math.max(0, currentUsage.total - currentUsage.used);
+        newRollover = Math.min(newRollover + unusedDreams, MAX_ROLLOVER_DREAMS);
+        console.log(`💎 Rollover: ${unusedDreams} unused dreams added. New rollover: ${newRollover}`);
+      }
+
+      // Calculate new total (plan dreams + rollover, capped at 12)
+      const newTotal = Math.min(dreamCount + newRollover, MAX_ROLLOVER_DREAMS);
+
       newUsage = {
         used: 0,
-        total: dreamCount,
+        total: newTotal,
         resetDate: nextResetDate.toISOString(),
-        planId
+        planId,
+        rollover: newRollover
       };
 
       if (isPlanChange) {
-        console.log(`🔄 Plan changed from ${currentUsage.planId} to ${planId}! Dreams reset to 0/${dreamCount}`);
+        console.log(`🔄 Plan changed from ${currentUsage.planId} to ${planId}! Dreams reset to 0/${newTotal} (rollover: ${newRollover})`);
       } else {
-        console.log('🔄 Dreams reset! New limits:', newUsage);
+        console.log(`🔄 Dreams reset! New: 0/${newTotal} (plan: ${dreamCount}, rollover: ${newRollover})`);
       }
     } else {
       newUsage = {
         ...currentUsage,
-        total: dreamCount,
+        total: Math.min(dreamCount + (currentUsage.rollover || 0), MAX_ROLLOVER_DREAMS),
         planId
       };
       console.log('📊 Dreams updated (no reset needed):', newUsage);
@@ -478,7 +493,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     setDreamUsage(newUsage);
     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
 
-    // 🔥 NEW: Sync to Firestore as source of truth
     if (user) {
       await syncUsageToFirestore(user.id, newUsage);
     }
@@ -488,18 +502,15 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
   const loadDreamUsage = async (): Promise<DreamUsage> => {
     try {
-      // 🔥 CRITICAL: Try Firestore FIRST (source of truth)
       if (user) {
         const firestoreUsage = await loadUsageFromFirestore(user.id);
         if (firestoreUsage) {
-          // Update local cache
           await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(firestoreUsage));
           setDreamUsage(firestoreUsage);
           return firestoreUsage;
         }
       }
 
-      // Fallback to AsyncStorage if Firestore unavailable (offline mode)
       const stored = await AsyncStorage.getItem(DREAM_USAGE_KEY);
       if (stored) {
         const usage = JSON.parse(stored);
@@ -513,9 +524,10 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
     const defaultUsage = {
       used: 0,
-      total: 0, // 🔥 FREE PLAN: 0 dreams
+      total: 0,
       resetDate: new Date().toISOString(),
-      planId: null
+      planId: null,
+      rollover: 0  // 🔥 NEW
     };
     setDreamUsage(defaultUsage);
     return defaultUsage;
@@ -524,16 +536,16 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   const resetUsage = async () => {
     const defaultUsage = {
       used: 0,
-      total: 0, // 🔥 FREE PLAN: 0 dreams
+      total: 0,
       resetDate: new Date().toISOString(),
-      planId: null
+      planId: null,
+      rollover: 0  // 🔥 NEW
     };
     setDreamUsage(defaultUsage);
     setSubscription(null);
     await AsyncStorage.removeItem(DREAM_USAGE_KEY);
     await AsyncStorage.removeItem(SUBSCRIPTION_KEY);
 
-    // 🔥 NEW: Sync to Firestore
     if (user) {
       await syncUsageToFirestore(user.id, defaultUsage);
     }
@@ -556,18 +568,24 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         const newResetDate = new Date();
         newResetDate.setDate(newResetDate.getDate() + 7);
 
+        // 🔥 NEW: Calculate rollover
+        const unusedDreams = Math.max(0, currentUsage.total - currentUsage.used);
+        const newRollover = Math.min((currentUsage.rollover || 0) + unusedDreams, MAX_ROLLOVER_DREAMS);
+        const newTotal = Math.min(subscription.dreams + newRollover, MAX_ROLLOVER_DREAMS);
+
         const resetUsage = {
           used: 0,
-          total: subscription.dreams,
+          total: newTotal,
           resetDate: newResetDate.toISOString(),
-          planId: subscription.id
+          planId: subscription.id,
+          rollover: newRollover
         };
 
         usageToCheck = resetUsage;
 
         setDreamUsage(resetUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(resetUsage));
-        console.log('✅ Weekly dreams reset! New usage:', resetUsage);
+        console.log(`✅ Weekly dreams reset! New usage: 0/${newTotal} (rollover: ${newRollover})`);
       }
     }
     else if (subscription?.period === 'monthly') {
@@ -578,18 +596,24 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         const newResetDate = new Date();
         newResetDate.setMonth(newResetDate.getMonth() + 1);
 
+        // 🔥 NEW: Calculate rollover
+        const unusedDreams = Math.max(0, currentUsage.total - currentUsage.used);
+        const newRollover = Math.min((currentUsage.rollover || 0) + unusedDreams, MAX_ROLLOVER_DREAMS);
+        const newTotal = Math.min(subscription.dreams + newRollover, MAX_ROLLOVER_DREAMS);
+
         const resetUsage = {
           used: 0,
-          total: subscription.dreams,
+          total: newTotal,
           resetDate: newResetDate.toISOString(),
-          planId: subscription.id
+          planId: subscription.id,
+          rollover: newRollover
         };
 
         usageToCheck = resetUsage;
 
         setDreamUsage(resetUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(resetUsage));
-        console.log('✅ Monthly dreams reset! New usage:', resetUsage);
+        console.log(`✅ Monthly dreams reset! New usage: 0/${newTotal} (rollover: ${newRollover})`);
       }
     }
 
@@ -613,12 +637,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     setDreamUsage(newUsage);
     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
 
-    // 🔥 NEW: Sync to Firestore (NOTE: This will be removed when server-side deduction is implemented)
     if (user) {
       await syncUsageToFirestore(user.id, newUsage);
     }
 
-    console.log(`✅ Dream used: ${newUsage.used}/${newUsage.total}`);
+    console.log(`✅ Dream used: ${newUsage.used}/${newUsage.total} (rollover: ${newUsage.rollover})`);
     return true;
   };
 
@@ -635,7 +658,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         setDreamUsage(refundedUsage);
         await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(refundedUsage));
 
-        // 🔥 NEW: Sync to Firestore
         if (user) {
           await syncUsageToFirestore(user.id, refundedUsage);
         }
@@ -861,11 +883,28 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
                       resetDate.setMonth(resetDate.getMonth() + 1);
                     }
 
+                    // 🔥 NEW: Add CURRENT unused dreams to rollover when changing plans
+                    const currentUsage = await loadDreamUsage();
+                    const currentUnused = Math.max(0, currentUsage.total - currentUsage.used);
+
+                    // Add current unused + existing rollover (cap at 12)
+                    const newRollover = Math.min(
+                      (currentUsage.rollover || 0) + currentUnused,
+                      MAX_ROLLOVER_DREAMS
+                    );
+
+                    // New total = plan dreams + rollover (cap at 12)
+                    const newTotal = Math.min(
+                      newPlanDetails.dreams + newRollover,
+                      MAX_ROLLOVER_DREAMS
+                    );
+
                     const newUsage = {
                       planId: newPlanId,
-                      total: newPlanDetails.dreams,
+                      total: newTotal,
                       used: 0,
                       resetDate: resetDate.toISOString(),
+                      rollover: newRollover,
                     };
 
                     const newSub: Subscription = {
@@ -883,16 +922,16 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
                     await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(newUsage));
                     await AsyncStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(newSub));
 
-                    // 🔥 NEW: Sync to Firestore
                     if (user) {
                       await syncUsageToFirestore(user.id, newUsage);
                     }
 
-                    console.log('✅ Plan changed and dreams reset:', newUsage);
+                    console.log(`✅ Plan changed: ${currentUnused} unused dreams added to rollover (${newRollover} total)`);
+                    console.log(`💎 New total: ${newTotal} dreams (${newPlanDetails.dreams} plan + ${newRollover} rollover)`);
 
                     Alert.alert(
                       'Success!',
-                      `You've ${action} ${changeInfo.newPlan}! Your dreams have been updated.`,
+                      `You've ${action} ${changeInfo.newPlan}! ${currentUnused > 0 ? `Your ${currentUnused} unused dream${currentUnused > 1 ? 's have' : ' has'} been added to your rollover.` : ''}\n\nYou now have ${newTotal} dream${newTotal > 1 ? 's' : ''} available!`,
                       [{ text: 'Great!', style: 'default' }]
                     );
                   }

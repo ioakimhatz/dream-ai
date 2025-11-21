@@ -21,14 +21,14 @@ const userRateLimits = new Map<string, { count: number; resetTime: number }>();
 export function checkDuplicateGeneration(userId: string, prompt: string): void {
   const key = `${userId}:${prompt.slice(0, 50)}`;
   const now = Date.now();
-  
+
   // Check if already running (within last 2 minutes)
   const runningTime = runningGenerations.get(key);
   if (runningTime && now - runningTime < 120000) { // 2 minutes
     console.log('🚫 DUPLICATE BLOCKED:', key);
     throw new Error('This dream is already being generated. Please wait!');
   }
-  
+
   console.log('✅ No duplicate detected');
 }
 
@@ -38,7 +38,7 @@ export function checkDuplicateGeneration(userId: string, prompt: string): void {
 export function markGenerationStart(userId: string, prompt: string): void {
   const key = `${userId}:${prompt.slice(0, 50)}`;
   const now = Date.now();
-  
+
   runningGenerations.set(key, now);
   console.log('🔒 Generation lock acquired:', key);
 }
@@ -58,7 +58,7 @@ export function clearGenerationLock(userId: string, prompt: string): void {
 export function checkRateLimit(userId: string): void {
   const now = Date.now();
   const rateLimit = userRateLimits.get(userId);
-  
+
   // Reset if time expired
   if (!rateLimit || now > rateLimit.resetTime) {
     userRateLimits.set(userId, {
@@ -68,14 +68,14 @@ export function checkRateLimit(userId: string): void {
     console.log('✅ Rate limit OK (new window)');
     return;
   }
-  
+
   // Check if exceeded
   if (rateLimit.count >= 3) {
     const waitSeconds = Math.ceil((rateLimit.resetTime - now) / 1000);
     console.log('🚫 RATE LIMIT HIT:', userId);
     throw new Error(`Too many generations. Please wait ${waitSeconds} seconds.`);
   }
-  
+
   // Increment count
   rateLimit.count++;
   console.log(`✅ Rate limit OK (${rateLimit.count}/3)`);
@@ -87,13 +87,13 @@ export function checkRateLimit(userId: string): void {
 export function logGeneration(userId: string): void {
   const now = Date.now();
   const history = generationHistory.get(userId) || [];
-  
+
   // Keep last 10 generations
   history.push(now);
   if (history.length > 10) {
     history.shift();
   }
-  
+
   generationHistory.set(userId, history);
 }
 
@@ -101,7 +101,7 @@ export function logGeneration(userId: string): void {
 setInterval(() => {
   const now = Date.now();
   const fiveMinutes = 5 * 60 * 1000;
-  
+
   // Clean running generations older than 5 minutes
   for (const [key, timestamp] of runningGenerations.entries()) {
     if (now - timestamp > fiveMinutes) {
@@ -109,7 +109,7 @@ setInterval(() => {
       console.log('🧹 Cleaned stale generation lock:', key);
     }
   }
-  
+
   // Clean rate limits that have expired
   for (const [userId, limit] of userRateLimits.entries()) {
     if (now > limit.resetTime) {
@@ -138,7 +138,7 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'bang', 'banged', 'banging', 'banger',
   'screw', 'screwed', 'screwing',
   'hump', 'humped', 'humping',
-  'mount', 'mounted', 'mounting',
+  'mounted', 'mounting',
   'breed', 'breeding',
   'seduce', 'seduced', 'seducing', 'seduction',
   'fondle', 'fondled', 'fondling',
@@ -151,7 +151,7 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'orgasm', 'orgasmic', 'climax',
   'ejaculate', 'ejaculated', 'ejaculating', 'ejaculation',
   'intercourse', 'coitus',
-  
+
   // Body parts - SEXUAL CONTEXT
   'dick', 'dicks', 'd1ck', 'd!ck', 'cock', 'cocks', 'penis', 'penises', 'member',
   'pussy', 'pussies', 'p*ssy', 'pu$$y', 'vagina', 'vaginas', 'cunt', 'cunts', 'c*nt',
@@ -163,7 +163,7 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'labia', 'vulva',
   'shaft', 'tip',
   'boner', 'erection', 'hard on', 'hardon',
-  
+
   // Nudity
   'nude', 'nudes', 'naked', 'nudity', 'n00dz', 'nudez',
   'topless', 'bottomless',
@@ -171,13 +171,13 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'strip', 'stripped', 'stripping', 'stripper', 'striptease',
   'bare', 'exposed', 'revealing',
   'flash', 'flashed', 'flashing', 'flasher',
-  
+
   // Pornography
   'porn', 'porno', 'pornography', 'pornographic', 'pr0n',
   'xxx', 'x-rated', 'adult film', 'adult movie',
   'nsfw', 'adult only', '18+', '18plus', 'mature content',
   'hentai', 'ecchi', 'doujin',
-  
+
   // Sexual descriptions
   'erotic', 'erotica', 'sensual', 'seductive',
   'kinky', 'fetish', 'kink',
@@ -185,7 +185,7 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'vulgar', 'obscene', 'indecent', 'filthy', 'dirty',
   'explicit', 'graphic',
   'provocative', 'suggestive',
-  
+
   // Slang/crude terms
   'horny', 'aroused', 'turned on', 'hot and bothered',
   'wet', 'moist', 'dripping', 'soaking',
@@ -206,7 +206,7 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'doggy', 'doggie', 'doggystyle', 'doggy style',
   '69', 'sixty nine', 'sixtynine',
   'missionary', 'cowgirl', 'reverse cowgirl',
-  
+
   // BDSM/Fetish
   'bdsm', 'bondage', 'dominance', 'submission', 'sadism', 'masochism',
   'dom', 'sub', 'domme',
@@ -216,11 +216,11 @@ const ENGLISH_EXPLICIT_KEYWORDS = [
   'choke', 'choked', 'choking',
   'bound', 'restrain', 'restrained',
   'rubber',
-  
+
   // Prostitution
   'prostitute', 'prostitution', 'whore', 'hooker', 'escort',
   'pimp', 'pimping', 'brothel',
-  
+
   // Inappropriate acts
   'incest', 'incestuous',
   'pedophile', 'pedophilia', 'pedo', 'child molester',
@@ -342,10 +342,10 @@ const LANGUAGE_KEYWORD_MAP: Record<string, string[]> = {
  */
 export function detectAdultContent(text: string, userLanguage: string = 'en'): boolean {
   const lowerText = text.toLowerCase();
-  
+
   // Build keyword list for this specific user
   let keywordsToCheck = [...ENGLISH_EXPLICIT_KEYWORDS]; // Always check English
-  
+
   // Add user's language keywords if not English
   if (userLanguage !== 'en' && LANGUAGE_KEYWORD_MAP[userLanguage]) {
     keywordsToCheck = [...keywordsToCheck, ...LANGUAGE_KEYWORD_MAP[userLanguage]];
@@ -353,7 +353,7 @@ export function detectAdultContent(text: string, userLanguage: string = 'en'): b
   } else {
     console.log('🌍 Checking English keywords only');
   }
-  
+
   // Check each keyword
   const matchedKeywords: string[] = [];
   for (const keyword of keywordsToCheck) {
@@ -361,16 +361,16 @@ export function detectAdultContent(text: string, userLanguage: string = 'en'): b
       matchedKeywords.push(keyword);
     }
   }
-  
+
   const detected = matchedKeywords.length > 0;
-  
+
   console.log('🔍 Checking prompt:', text);
   console.log('🔍 User language:', userLanguage);
   console.log('🔍 Adult content detected:', detected);
   if (detected) {
     console.log('🔍 Matched keywords:', matchedKeywords);
   }
-  
+
   return detected;
 }
 
@@ -421,7 +421,7 @@ export function analyzePromptStrength(prompt: string, userLanguage: string = 'en
     'beautiful', 'warm', 'soft', 'gentle', 'bright', 'dark', 'big', 'small'
   ];
 
-  const qualityCount = qualityWords.filter(word => 
+  const qualityCount = qualityWords.filter(word =>
     text.includes(word) || text.includes(word + 'ing') || text.includes(word + 'ed')
   ).length;
 
@@ -475,11 +475,11 @@ export function analyzePromptStrength(prompt: string, userLanguage: string = 'en
       suggestions.push('Almost ready! Add the SETTING (beach, home, forest) or TIME (sunset, morning)');
     }
   } else if (!hasAdultContent) {
-    const hasEmotion = qualityWords.filter(word => 
+    const hasEmotion = qualityWords.filter(word =>
       ['happy', 'sad', 'love', 'joy', 'peaceful', 'excited', 'calm', 'feel'].includes(word) && text.includes(word)
     ).length > 0;
-    
-    const hasLocation = qualityWords.filter(word => 
+
+    const hasLocation = qualityWords.filter(word =>
       ['home', 'house', 'garden', 'park', 'beach', 'forest', 'room', 'kitchen'].includes(word) && text.includes(word)
     ).length > 0;
 
@@ -511,11 +511,11 @@ export function getStrengthMessage(analysis: PromptAnalysis): string {
   if (analysis.hasAdultContent) {
     return '⚠️ Inappropriate content - keep your dreams family-friendly';
   }
-  
+
   if (!analysis.canGenerate) {
     return '💭 Need at least 8 words to create your dream cinema';
   }
-  
+
   switch (analysis.strength) {
     case 'WEAK':
       return '💭 Tell us more: WHO, WHAT, WHERE in your dream?';
@@ -535,11 +535,11 @@ export function getStrengthColor(analysis: PromptAnalysis): string {
   if (analysis.hasAdultContent) {
     return '#ff0000';
   }
-  
+
   if (!analysis.canGenerate) {
     return '#ff6b6b';
   }
-  
+
   switch (analysis.strength) {
     case 'WEAK':
       return '#ff9500';
@@ -556,7 +556,7 @@ export function getStrengthColor(analysis: PromptAnalysis): string {
 
 export const EXAMPLE_PROMPTS = [
   "Flying over my childhood home with my best friend on a sunny afternoon",
-  "Dancing with my grandmother in her rose garden during golden sunset hour", 
+  "Dancing with my grandmother in her rose garden during golden sunset hour",
   "Walking on the beach with my golden retriever feeling peaceful and free",
   "Sitting by a campfire with my family under the starry night sky",
   "Running through a field of sunflowers feeling happy and alive in summer"
