@@ -42,7 +42,7 @@ const downloadVideoLocally = async (url: string, id: string): Promise<string> =>
       return path;
     }
 
-    console.log('📥 Downloading video from Cloudinary...');
+    console.log('📥 Downloading video from CDN...');
     const { uri } = await FileSystem.downloadAsync(url, path);
     console.log('✅ Video downloaded to:', uri);
     return uri;
@@ -115,7 +115,7 @@ function VideoPlayerModal({
   }, [visible, fadeAnim]);
 
   useEffect(() => {
-    if (visible && dream && currentVideoUrl?.includes('cloudinary.com')) {
+    if (visible && dream && currentVideoUrl && (currentVideoUrl.includes('cloudinary.com') || currentVideoUrl.includes('b-cdn.net'))) {
       downloadVideoLocally(currentVideoUrl, dream.id).catch(console.error);
     }
   }, [visible, dream, currentVideoUrl]);
@@ -193,7 +193,7 @@ function VideoPlayerModal({
     try {
       const videoToShare = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
 
-      if (videoToShare.includes('cloudinary.com')) {
+      if (videoToShare.includes('cloudinary.com') || videoToShare.includes('b-cdn.net')) {
         Alert.alert('Preparing...', 'Downloading video to share');
 
         const localUri = await downloadVideoLocally(videoToShare, dream.id);
@@ -229,7 +229,7 @@ function VideoPlayerModal({
 
       const videoToDownload = currentVideoUrl || (dream.clips?.[0]) || dream.videoUrl || '';
 
-      if (videoToDownload.includes('cloudinary.com')) {
+      if (videoToDownload.includes('cloudinary.com') || videoToDownload.includes('b-cdn.net')) {
         Alert.alert('Downloading...', 'Please wait while we save your dream');
 
         const localUri = await downloadVideoLocally(videoToDownload, dream!.id);
