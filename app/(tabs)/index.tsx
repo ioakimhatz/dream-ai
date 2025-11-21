@@ -232,7 +232,6 @@ export default function HomeScreen() {
   const {
     dreamUsage,
     subscription,
-    refundDream,
     offerings,
     purchaseSubscription,
     restorePurchases,
@@ -384,15 +383,13 @@ export default function HomeScreen() {
               setIsGenerating(false);
               setActiveJobId(null);
 
-              try {
-                refundDream();
-              } catch (refundError) {
-                console.error('Failed to refund dream:', refundError);
-              }
+              // ✅ Backend automatically refunds via Cloud Function (processDreamJob.ts)
+              // ✅ Real-time listener will show updated count immediately
+              // No need for frontend refund (would cause double refund)
 
               Alert.alert(
                 'Generation Failed - Dream Restored',
-                job.error || 'Failed to generate dream cinema. Please try again.',
+                job.error || 'Your dream has been restored. Please try again.',
                 [{ text: 'OK' }]
               );
 
@@ -680,15 +677,13 @@ export default function HomeScreen() {
             console.error('❌ Job failed:', job.error);
             setIsGenerating(false);
 
-            try {
-              refundDream();
-            } catch (refundError) {
-              console.error('Failed to refund dream:', refundError);
-            }
+            // ✅ Backend automatically refunds via Cloud Function (processDreamJob.ts)
+            // ✅ Real-time listener will show updated count immediately
+            // No need for frontend refund (would cause double refund)
 
             Alert.alert(
               'Generation Failed - Dream Restored',
-              job.error || 'Failed to generate dream cinema. Please try again.',
+              job.error || 'Your dream has been restored. Please try again.',
               [{ text: 'OK' }]
             );
 
@@ -731,7 +726,7 @@ export default function HomeScreen() {
         [{ text: 'OK' }]
       );
     }
-  }, [transcript, user, selectedImages, refundDream]);
+  }, [transcript, user, selectedImages]);
 
   const handleGenerateDream = async () => {
     if (isGenerating) {

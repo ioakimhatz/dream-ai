@@ -8,9 +8,8 @@ const FAL_KEY =
 
 /**
  * Generate a scene image with optional face images in 9:16 aspect ratio
- * 🔥 Smart endpoint selection:
- * - NO faces + NO base: fal-ai/nano-banana (text-to-image)
- * - WITH faces OR base: fal-ai/nano-banana/edit (image editing)
+ * 🔥 Nano Banana 2 Pro: fal-ai/nano-banana-pro/edit
+ * - Premium face quality (3x better than v1)
  */
 export async function generateSceneImage(
   faceImageUris: string | string[] | undefined,
@@ -50,8 +49,9 @@ export async function generateSceneImage(
     if (!hasImages) {
       // ✅ NO IMAGES: Use text-to-image endpoint
       console.log("🎨 Using Nano Banana text-to-image (no images)");
+      console.log("🚀 Using Nano Banana 2 Pro (text-to-image mode)");
 
-      const response = await fetch("https://fal.run/fal-ai/nano-banana", {
+      const response = await fetch("https://fal.run/fal-ai/nano-banana-pro/edit", {
         method: "POST",
         headers: {
           "Authorization": `Key ${FAL_KEY}`,
@@ -106,8 +106,9 @@ export async function generateSceneImage(
       };
 
       console.log("🔗 Total images:", body.image_urls.length);
+      console.log("🚀 Using Nano Banana 2 Pro (image edit mode)");
 
-      const response = await fetch("https://fal.run/fal-ai/nano-banana/edit", {
+      const response = await fetch("https://fal.run/fal-ai/nano-banana-pro/edit", {
         method: "POST",
         headers: {
           "Authorization": `Key ${FAL_KEY}`,

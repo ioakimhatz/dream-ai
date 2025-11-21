@@ -7,7 +7,7 @@ import Purchases, {
   PurchasesPackage
 } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
-import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 
 interface DreamUsage {
@@ -162,7 +162,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         await clearSubscriptionCache();
 
         await loginToRevenueCat(user.id);
-        await loadDreamUsage();
+        // ℹ️ Note: loadDreamUsage is now replaced by real-time listener below
         await checkSubscriptionStatus();
       } else {
         console.log('👤 No user - logging out and clearing data');
@@ -173,6 +173,67 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     };
 
     initializeUser();
+  }, [user]);
+
+  // ✅ NEW: Real-time listener for dream usage - Auto-updates when Firestore changes!
+  useEffect(() => {
+    if (!user) {
+      setDreamUsage({
+        used: 0,
+        total: 0,
+        resetDate: new Date().toISOString(),
+        planId: null,
+        rollover: 0
+      });
+      return;
+    }
+
+    console.log('👂 Setting up real-time listener for dream usage...');
+    const usageRef = doc(db, 'dreamUsage', user.id);
+
+    // ✅ REAL-TIME LISTENER - Auto-updates when Firestore changes!
+    const unsubscribe = onSnapshot(
+      usageRef,
+      async (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const usage: DreamUsage = {
+            used: data.used || 0,
+            total: data.total || 0,
+            resetDate: data.resetDate?.toDate?.()?.toISOString() || new Date().toISOString(),
+            planId: data.planId || null,
+            rollover: data.rollover || 0,
+          };
+          console.log('🔄 Real-time update from Firestore:', usage);
+          setDreamUsage(usage);
+
+          // Also save to AsyncStorage for offline access
+          await AsyncStorage.setItem(DREAM_USAGE_KEY, JSON.stringify(usage));
+        } else {
+          // Document doesn't exist, use defaults
+          console.log('📝 No usage doc found, using defaults');
+          const defaultUsage: DreamUsage = {
+            used: 0,
+            total: 0,
+            resetDate: new Date().toISOString(),
+            planId: null,
+            rollover: 0
+          };
+          setDreamUsage(defaultUsage);
+        }
+      },
+      (error) => {
+        console.error('❌ Error in real-time listener:', error);
+        // Fallback to AsyncStorage on error
+        loadDreamUsage().catch(console.error);
+      }
+    );
+
+    // Cleanup listener on unmount or user change
+    return () => {
+      console.log('👋 Cleaning up dream usage listener');
+      unsubscribe();
+    };
   }, [user]);
 
   const clearSubscriptionCache = async () => {
