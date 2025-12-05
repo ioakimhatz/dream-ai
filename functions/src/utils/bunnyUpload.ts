@@ -84,6 +84,9 @@ export async function uploadToBunny(
 /**
  * Stitch video clips using FFmpeg and upload to Bunny CDN
  * Drop-in replacement for stitchWithCloudinary()
+ * 
+ * ✅ FIXED: Now uses proper encoding with faststart for iOS/Mac compatibility
+ * ✅ FIXED: Adds compression to reduce file size for faster loading
  */
 export async function stitchWithBunny(localClipPaths: string[]): Promise<string> {
     const tmpDir = '/tmp/dream-ai';
@@ -104,10 +107,31 @@ export async function stitchWithBunny(localClipPaths: string[]): Promise<string>
             .join('\n');
         fs.writeFileSync(concatListPath, concatList);
 
-        // FFmpeg stitch command
-        const ffmpegCmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c copy -y "${outputPath}"`;
+        // ✅ FIXED FFmpeg command with proper encoding and streaming optimization
+        // Changes from original:
+        // - Removed `-c copy` (was causing frozen frames and no faststart)
+        // - Added `-c:v libx264` (proper H.264 encoding)
+        // - Added `-preset fast` (good speed/quality balance)
+        // - Added `-crf 23` (good quality, smaller file size)
+        // - Added `-movflags +faststart` (CRITICAL for iOS/Mac streaming - moves metadata to beginning)
+        // - Added `-r 30` (consistent 30fps)
+        // - Added `-pix_fmt yuv420p` (universal compatibility)
+        // - Added `-profile:v baseline -level 3.0` (iOS compatibility)
+        // - Added `-maxrate 5M -bufsize 10M` (prevents loading issues on mobile)
+        const ffmpegCmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" \
+            -c:v libx264 \
+            -preset fast \
+            -crf 23 \
+            -movflags +faststart \
+            -r 30 \
+            -pix_fmt yuv420p \
+            -profile:v baseline \
+            -level 3.0 \
+            -maxrate 5M \
+            -bufsize 10M \
+            -y "${outputPath}"`;
 
-        console.log('🎥 [Bunny] Executing FFmpeg...');
+        console.log('🎥 [Bunny] Executing FFmpeg with proper encoding...');
         execSync(ffmpegCmd, { stdio: 'pipe' });
 
         // Verify output exists

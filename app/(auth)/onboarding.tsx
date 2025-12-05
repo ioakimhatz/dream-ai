@@ -4,17 +4,18 @@ import { router } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
   Animated,
-  Dimensions,
   Image,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const { width } = Dimensions.get('window');
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { db, auth } from '../config/firebaseConfig';
+import { doc, setDoc, increment, serverTimestamp } from 'firebase/firestore';
 
 // ---- SAFETY NET: guard all icons so missing glyphs don't crash a step ----
 const hasGlyph = (name: string) => (Ionicons as any)?.glyphMap?.[name] != null;
@@ -59,29 +60,88 @@ const QUESTIONS = [
     subtitle: 'AI will create 3 scenes from your description',
     preview: { scenes: ['Opening scene', 'Main action', 'Epic finale'], duration: '15 seconds', quality: 'HD cinematic' }
   },
-  { id: 'final', question: 'Ready to capture\nyour dream memories?', subtitle: 'Start building your complete memory library tonight' }
+  { id: 'final', question: 'Ready to capture\nyour dream memories?', subtitle: 'Start building your complete memory library tonight' },
+  { id: 'referral', type: 'referral', question: 'Enter referral code', subtitle: '(optional)', secondarySubtitle: 'You can skip this step' }
 ];
 
 export default function OnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [referralCode, setReferralCode] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   if (!fontsLoaded) return null;
+
+  // Handle referral code submission
+  const handleReferralSubmit = async () => {
+    if (!referralCode.trim()) {
+      router.push('/auth-select');
+      return;
+    }
+
+    // Prevent double submission
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const code = referralCode.trim().toUpperCase();
+
+      // Check if already submitted (prevent spam)
+      const alreadySubmitted = await AsyncStorage.getItem('referralSubmitted');
+      if (alreadySubmitted === 'true') {
+        console.log('⚠️ Referral already submitted, skipping');
+        router.push('/auth-select');
+        return;
+      }
+
+      // Store code in AsyncStorage
+      await AsyncStorage.setItem('referralCode', code);
+      await AsyncStorage.setItem('referralSubmitted', 'true'); // Mark as submitted
+
+      // Update Firestore referrals document
+      const referralDocRef = doc(db, 'referrals', code);
+      await setDoc(referralDocRef, {
+        code: code,
+        installs: increment(1),
+        lastInstall: serverTimestamp()
+      }, { merge: true });
+
+      // If user is authenticated, also update their user document
+      if (auth.currentUser) {
+        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        await setDoc(userDocRef, {
+          referralCode: code,
+          referredAt: serverTimestamp()
+        }, { merge: true });
+      }
+
+      console.log('✅ Referral code saved:', code);
+    } catch (error) {
+      // Log error but don't block user from continuing
+      console.error('Failed to save referral code:', error);
+    } finally {
+      setIsSubmitting(false);
+      router.push('/auth-select');
+    }
+  };
+
+  // Handle skip button
+  const handleReferralSkip = () => {
+    router.push('/auth-select');
+  };
 
   const handleContinue = () => {
     if (currentStep < QUESTIONS.length - 1) {
       Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
         const nextStep = currentStep + 1;
         setCurrentStep(nextStep);
-        
-        // Dream AI screen (index 3) - NO scale animation (causes Image rendering issues)
+
         if (nextStep === 3) {
           scaleAnim.setValue(1);
           Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
         }
-        // Photos screen (index 2) - animate scale for pop effect
         else if (nextStep === 2) {
           scaleAnim.setValue(0.8);
           Animated.parallel([
@@ -89,7 +149,6 @@ export default function OnboardingScreen() {
             Animated.spring(scaleAnim, { toValue: 1, friction: 8, tension: 40, useNativeDriver: true })
           ]).start();
         }
-        // All other screens - just fade in smoothly
         else {
           scaleAnim.setValue(1);
           Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
@@ -105,8 +164,7 @@ export default function OnboardingScreen() {
       Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
         const prevStep = currentStep - 1;
         setCurrentStep(prevStep);
-        
-        // Same logic for going back
+
         if (prevStep === 3) {
           scaleAnim.setValue(1);
           Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
@@ -128,7 +186,7 @@ export default function OnboardingScreen() {
 
   const progress = ((currentStep + 1) / QUESTIONS.length) * 100;
   const current = QUESTIONS[currentStep] || QUESTIONS[0];
-  
+
   if (!current) {
     console.error('❌ Current step is undefined:', currentStep);
     return null;
@@ -140,6 +198,7 @@ export default function OnboardingScreen() {
   const isMathScreen = current.type === 'math';
   const isPhotosIconScreen = current.type === 'photos_icon';
   const isDreamIconScreen = current.type === 'dream_icon';
+  const isReferralScreen = current.type === 'referral';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -223,7 +282,7 @@ export default function OnboardingScreen() {
             </>
           )}
 
-          {/* DREAM ICON - NO SCALE ANIMATION (Image rendering issue) */}
+          {/* DREAM ICON */}
           {isDreamIconScreen && (
             <>
               <View style={styles.questionContainer}>
@@ -265,8 +324,51 @@ export default function OnboardingScreen() {
             </>
           )}
 
+          {/* REFERRAL */}
+          {isReferralScreen && (
+            <View style={styles.referralWrapper}>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+                {current.secondarySubtitle && (
+                  <Text style={styles.secondarySubtitle}>{current.secondarySubtitle}</Text>
+                )}
+              </View>
+              <View style={styles.referralInputContainer}>
+                {/* Input + Submit on same row */}
+                <View style={styles.inputRow}>
+                  <TextInput
+                    style={styles.referralInput}
+                    placeholder="Referral Code"
+                    placeholderTextColor="#999"
+                    value={referralCode}
+                    onChangeText={setReferralCode}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    editable={!isSubmitting}
+                  />
+                  <TouchableOpacity
+                    style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                    onPress={handleReferralSubmit}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.submitButtonText}>
+                      {isSubmitting ? 'Submitting...' : 'Submit'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {/* Skip button at absolute bottom */}
+              <View style={styles.skipButtonContainer}>
+                <TouchableOpacity style={styles.skipButton} onPress={handleReferralSkip} disabled={isSubmitting}>
+                  <Text style={styles.skipButtonText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* REGULAR QUESTION */}
-          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && (
+          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && !isReferralScreen && (
             <View style={styles.questionContainer}>
               <Text style={styles.question}>{current.question}</Text>
               <Text style={styles.subtitle}>{current.subtitle}</Text>
@@ -382,12 +484,14 @@ export default function OnboardingScreen() {
           )}
 
           {/* CONTINUE BUTTON */}
-          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-            <Text style={styles.continueButtonText}>
-              {isScienceScreen ? 'Got it! Continue' : isExamplesScreen ? 'I understand' : isPreviewScreen ? 'Ready to create!' : 'Continue'}
-            </Text>
-            <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
-          </TouchableOpacity>
+          {!isReferralScreen && (
+            <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+              <Text style={styles.continueButtonText}>
+                {isScienceScreen ? 'Got it! Continue' : isExamplesScreen ? 'I understand' : isPreviewScreen ? 'Ready to create!' : 'Continue'}
+              </Text>
+              <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </Animated.View>
     </SafeAreaView>
@@ -402,8 +506,8 @@ const styles = StyleSheet.create({
   progressBar: { height: 3, backgroundColor: '#F0F0F0', borderRadius: 1.5, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: '#7E78EA', borderRadius: 1.5 },
   content: { flex: 1, paddingHorizontal: 24, paddingVertical: 20 },
-  scrollContent: { 
-    flexGrow: 1, 
+  scrollContent: {
+    flexGrow: 1,
     paddingBottom: 40,
     paddingTop: 20,
     minHeight: 500
@@ -475,7 +579,6 @@ const styles = StyleSheet.create({
   sceneNumber: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#7E78EA', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   sceneNumberText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: '#FFF' },
   sceneText: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: '#000' },
-
   previewFeatures: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16 },
   featureItem: { alignItems: 'center', gap: 6 },
   featureText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#666' },
@@ -483,4 +586,75 @@ const styles = StyleSheet.create({
   // CTA
   continueButton: { flexDirection: 'row', backgroundColor: '#7E78EA', paddingVertical: 18, paddingHorizontal: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 20 },
   continueButtonText: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
+
+  // Referral
+  referralWrapper: {
+    flex: 1,
+    position: 'relative'
+  },
+  referralInputContainer: {
+    marginTop: 20
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center'
+  },
+  referralInput: {
+    flex: 1,
+    backgroundColor: '#F8F8F8',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    fontSize: 16,
+    fontFamily: 'Inter_500Medium',
+    color: '#000',
+    textAlign: 'center'
+  },
+  submitButton: {
+    backgroundColor: '#7E78EA',
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  submitButtonDisabled: {
+    opacity: 0.5
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFF'
+  },
+  skipButtonContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 0
+  },
+  skipButton: {
+    backgroundColor: '#7E78EA',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  skipButtonText: {
+    fontSize: 17,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFF'
+  },
+  secondarySubtitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#999',
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 4
+  },
 });

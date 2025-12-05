@@ -7,8 +7,8 @@ import Purchases, {
   PurchasesPackage
 } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
-import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot } from 'firebase/firestore';
-import { db } from '../config/firebaseConfig';
+import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot, increment, serverTimestamp, addDoc, collection } from 'firebase/firestore';
+import { db, auth } from '../config/firebaseConfig';
 
 interface DreamUsage {
   used: number;
@@ -835,6 +835,46 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
               await updateDreamLimits(planId, details.dreams, details.period);
 
               console.log('✅ Subscription activated:', details.name, `(${details.dreams} dreams)`);
+
+              // 🔥 REFERRAL TRACKING - Track subscription attribution
+              try {
+                const referralCode = await AsyncStorage.getItem('referralCode');
+
+                if (referralCode) {
+                  // Get subscription amount based on tier
+                  const subscriptionPrices: { [key: string]: number } = {
+                    'dream_weekly': 3.49,
+                    'dream_basic_monthly': 9.49,
+                    'dream_pro_monthly': 12.49
+                  };
+                  const amount = subscriptionPrices[planId] || 3.49;
+
+                  // Update referral stats
+                  await setDoc(
+                    doc(db, 'referrals', referralCode),
+                    {
+                      subscriptions: increment(1),
+                      revenue: increment(amount),
+                      lastSubscription: serverTimestamp()
+                    },
+                    { merge: true }
+                  );
+
+                  // Log individual conversion
+                  await addDoc(collection(db, 'conversions'), {
+                    referralCode,
+                    userId: user?.id || auth.currentUser?.uid,
+                    planId,
+                    amount,
+                    timestamp: serverTimestamp()
+                  });
+
+                  console.log('✅ Subscription tracked for referral:', referralCode, `($${amount})`);
+                }
+              } catch (referralError) {
+                // Don't block purchase success if referral tracking fails
+                console.error('⚠️ Referral tracking error (non-blocking):', referralError);
+              }
 
               return true;
             }
