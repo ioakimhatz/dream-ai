@@ -22,8 +22,20 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
+
+// Check if running on simulator
+const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+
+let Notifications: any = null;
+if (!isSimulator) {
+  try {
+    Notifications = require('expo-notifications');
+  } catch (e) {
+    console.log('📱 Notifications not available on simulator');
+  }
+}
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext';
 import { SubscriptionModal } from '@/components/SubscriptionModal';
@@ -70,6 +82,13 @@ export default function SettingsScreen() {
   }, []);
 
   const loadNotificationState = async () => {
+    if (isSimulator || !Notifications) {
+      console.log('📱 Skipping notification state on simulator');
+      setNotificationsEnabled(false);
+      setNotificationPermissionStatus('denied');
+      return;
+    }
+
     try {
       // Check OS permissions
       const { status } = await Notifications.getPermissionsAsync();
@@ -93,6 +112,11 @@ export default function SettingsScreen() {
   }, [user]);
 
   const updateNotifications = async (value: boolean) => {
+    if (isSimulator || !Notifications) {
+      Alert.alert('Simulator', 'Notifications are not available on iOS simulator. Please test on a real device.');
+      return;
+    }
+
     try {
       if (value) {
         // User wants to enable notifications

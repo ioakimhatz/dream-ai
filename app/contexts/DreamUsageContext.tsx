@@ -1,7 +1,8 @@
 // app/contexts/DreamUsageContext.tsx - DREAM BANK: Simple rollover system (dreams accumulate up to 12)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import Purchases, {
   PurchasesOffering,
   PurchasesPackage
@@ -9,6 +10,9 @@ import Purchases, {
 import { useAuth } from './AuthContext';
 import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot, increment, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { db, auth } from '../config/firebaseConfig';
+
+// Check if running on simulator
+const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
 
 interface DreamUsage {
   used: number;
@@ -255,6 +259,12 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   };
 
   const loadOfferings = async () => {
+    if (isSimulator) {
+      console.log('📱 Skipping RevenueCat offerings on simulator');
+      setIsLoadingSubscription(false);
+      return;
+    }
+
     try {
       const offerings = await Purchases.getOfferings();
       if (offerings.current) {
@@ -269,6 +279,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   };
 
   const loginToRevenueCat = async (userId: string) => {
+    if (isSimulator) {
+      console.log('📱 Skipping RevenueCat login on simulator');
+      return;
+    }
+
     try {
       console.log('🔐 Logging in to RevenueCat with user:', userId);
 
@@ -289,6 +304,11 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   };
 
   const logoutFromRevenueCat = async () => {
+    if (isSimulator) {
+      console.log('📱 Skipping RevenueCat logout on simulator');
+      return;
+    }
+
     try {
       const customerInfo = await Purchases.getCustomerInfo();
       if (!customerInfo.originalAppUserId.startsWith('$RCAnonymousID')) {
@@ -311,6 +331,21 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
   };
 
   const checkSubscriptionStatus = async () => {
+    if (isSimulator) {
+      console.log('📱 Skipping subscription check on simulator - setting FREE plan');
+      const freeUsage = {
+        used: 0,
+        total: 0,
+        resetDate: new Date().toISOString(),
+        planId: null,
+        rollover: 0
+      };
+      setDreamUsage(freeUsage);
+      setSubscription(null);
+      setIsLoadingSubscription(false);
+      return;
+    }
+
     try {
       setIsLoadingSubscription(true);
 

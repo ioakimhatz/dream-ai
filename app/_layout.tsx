@@ -9,11 +9,16 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import Purchases from 'react-native-purchases';
+
+// Check if running on simulator
+const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
 import { LanguageProvider } from './contexts/LanguageContext';
+import { ConversationProvider } from './contexts/ConversationContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -62,6 +67,11 @@ function AppContent() {
 
   useEffect(() => {
     const initializeRevenueCat = async () => {
+      if (isSimulator) {
+        console.log('📱 Skipping RevenueCat initialization on simulator');
+        return;
+      }
+
       try {
         console.log('💰 Initializing RevenueCat...');
         if (Platform.OS === 'android') {
@@ -102,19 +112,21 @@ function AppContent() {
   return (
     <LanguageProvider>
       <DreamUsageProvider>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: '#FFFFFF' },
-            animation: 'fade',
-          }}
-          initialRouteName={hasSeenOnboarding ? '(tabs)' : '(auth)'}
-        >
-          <Stack.Screen name="(auth)" options={{ animation: 'slide_from_right' }} />
-          <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-          <Stack.Screen name="+not-found" />
-          <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy', presentation: 'modal' }} />
-        </Stack>
+        <ConversationProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: '#FFFFFF' },
+              animation: 'fade',
+            }}
+            initialRouteName={hasSeenOnboarding ? '(tabs)' : '(auth)'}
+          >
+            <Stack.Screen name="(auth)" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+            <Stack.Screen name="+not-found" />
+            <Stack.Screen name="privacy-policy" options={{ title: 'Privacy Policy', presentation: 'modal' }} />
+          </Stack>
+        </ConversationProvider>
       </DreamUsageProvider>
     </LanguageProvider>
   );

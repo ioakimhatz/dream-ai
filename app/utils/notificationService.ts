@@ -1,48 +1,66 @@
 // app/utils/notificationService.ts - Expo-compatible version (no native Firebase)
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { doc, setDoc, Timestamp } from 'firebase/firestore';
 import { firestore } from '../config/firebaseConfig';
 
-// Configure how notifications should behave
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Check if running on simulator
+const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+
+let Notifications: any = null;
+if (!isSimulator) {
+  try {
+    Notifications = require('expo-notifications');
+    // Configure how notifications should behave
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  } catch (e) {
+    console.log('📱 Notifications not available on simulator');
+  }
+} else {
+  console.log('📱 Running on simulator - notifications disabled');
+}
 
 /**
  * Request push notification permissions and get Expo Push Token
  */
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (isSimulator || !Notifications) {
+    console.log('📱 Skipping notifications on simulator');
+    return null;
+  }
+
   try {
     // Request permission
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-    
+
     if (existingStatus !== 'granted') {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
-    
+
     if (finalStatus !== 'granted') {
       console.log('❌ Notification permission denied');
       return null;
     }
-    
+
     console.log('✅ Notification permission granted');
-    
+
     // Get Expo Push Token
     const token = (await Notifications.getExpoPushTokenAsync({
       projectId: '0fa46614-499e-4052-90a9-43f3c98b573b', // Your EAS project ID from app.json
     })).data;
-    
+
     console.log('📱 Expo Push Token:', token);
-    
+
     // Create notification channels for Android
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('video-generation', {
@@ -53,7 +71,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
         sound: 'default',
         description: 'Notifications for when your dream videos are ready',
       });
-      
+
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Default',
         importance: Notifications.AndroidImportance.DEFAULT,
@@ -62,7 +80,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
         sound: 'default',
       });
     }
-    
+
     return token;
   } catch (error) {
     console.error('Failed to register for notifications:', error);
@@ -74,6 +92,11 @@ export async function registerForPushNotifications(): Promise<string | null> {
  * Save Expo Push Token to Firestore
  */
 export async function saveFCMToken(userId: string, token: string): Promise<void> {
+  if (isSimulator || !token) {
+    console.log('📱 Skipping token save on simulator');
+    return;
+  }
+
   try {
     const userRef = doc(firestore, 'users', userId);
     await setDoc(
@@ -136,6 +159,11 @@ async function markJobAsNotified(jobId: string): Promise<void> {
  * Only sends once per jobId to prevent duplicates
  */
 export async function sendVideoReadyNotification(videoUrl: string, jobId?: string): Promise<void> {
+  if (isSimulator || !Notifications) {
+    console.log('📱 Skipping notification on simulator');
+    return;
+  }
+
   try {
     // If jobId provided, check if we already notified
     if (jobId) {
@@ -173,6 +201,11 @@ export async function sendVideoReadyNotification(videoUrl: string, jobId?: strin
  * Only sends once per jobId to prevent duplicates
  */
 export async function sendVideoFailedNotification(jobId?: string): Promise<void> {
+  if (isSimulator || !Notifications) {
+    console.log('📱 Skipping notification on simulator');
+    return;
+  }
+
   try {
     // If jobId provided, check if we already notified
     if (jobId) {
@@ -209,22 +242,27 @@ export async function sendVideoFailedNotification(jobId?: string): Promise<void>
  * Setup notification listeners
  */
 export function setupNotificationListeners() {
+  if (isSimulator || !Notifications) {
+    console.log('📱 Skipping notification listeners on simulator');
+    return () => {}; // Return empty cleanup function
+  }
+
   // Handle notification received while app is in foreground
   const foregroundSubscription = Notifications.addNotificationReceivedListener((notification) => {
     console.log('📬 Notification received in foreground:', notification);
   });
-  
+
   // Handle notification tapped
   const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
     console.log('👆 Notification tapped:', response);
     const { videoUrl, type } = response.notification.request.content.data;
-    
+
     if (type === 'video_ready' && videoUrl) {
       // Navigate to video or open it
       console.log('📹 Opening video:', videoUrl);
     }
   });
-  
+
   return () => {
     foregroundSubscription.remove();
     responseSubscription.remove();
@@ -235,6 +273,11 @@ export function setupNotificationListeners() {
  * Cancel all pending notifications
  */
 export async function cancelAllNotifications(): Promise<void> {
+  if (isSimulator || !Notifications) {
+    console.log('📱 Skipping notification cancel on simulator');
+    return;
+  }
+
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
     console.log('✅ All scheduled notifications cancelled');

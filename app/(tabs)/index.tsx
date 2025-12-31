@@ -28,10 +28,12 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useConversation } from '../contexts/ConversationContext';
+import { DreamOrb } from '../components/DreamOrb';
+import { buildDreamPrompt } from '../services/openaiConversationService';
 import { removeBackground } from '../utils/backgroundRemoval';
 import { analyzePromptStrength } from '../utils/promptValidator';
 import { saveDream } from '../utils/storage';
-import { transcribeAudio } from '../utils/transcribe';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import {
@@ -150,6 +152,14 @@ const PromptStrengthIndicator = ({ prompt, onAnalysisChange, userLanguage }: {
 
 export default function HomeScreen() {
   const { language } = useLanguage();
+  const {
+    orbState,
+    startConversation,
+    isConversationComplete,
+    extractedData,
+    currentMessage,
+    resetConversation,
+  } = useConversation();
 
   useEffect(() => {
     const fix = () => {
@@ -241,12 +251,7 @@ export default function HomeScreen() {
   const [showBlurredPreview, setShowBlurredPreview] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
 
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [transcript, setTranscript] = useState('');
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [currentLanguage, setCurrentLanguage] = useState('en');
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const generationLockRef = useRef(false);
 
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -267,29 +272,7 @@ export default function HomeScreen() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [completedDreamId, setCompletedDreamId] = useState<string | null>(null);
 
-  const waveAnimations = useRef([
-    new Animated.Value(0.3),
-    new Animated.Value(0.5),
-    new Animated.Value(0.8),
-    new Animated.Value(0.4),
-    new Animated.Value(0.6),
-  ]).current;
-
-  useFocusEffect(
-    useCallback(() => {
-      (async () => {
-        try {
-          const saved = await AsyncStorage.getItem('language');
-          if (saved) {
-            console.log('🌍 Loading language:', saved);
-            setCurrentLanguage(saved);
-          }
-        } catch (e) {
-          console.error('Failed to load language:', e);
-        }
-      })();
-    }, [])
-  );
+  // Language is now handled by LanguageContext, no need to load separately
 
   useFocusEffect(
     useCallback(() => {
@@ -317,13 +300,23 @@ export default function HomeScreen() {
     })();
   }, []);
 
+  // Auto-fill text box when conversation is complete
+  useEffect(() => {
+    if (isConversationComplete && extractedData) {
+      const dreamDescription = buildDreamPrompt(extractedData);
+      console.log('✅ Conversation complete, auto-filling text box:', dreamDescription);
+      setTranscript(dreamDescription);
+      // Reset conversation for next time
+      setTimeout(() => {
+        resetConversation();
+      }, 1000);
+    }
+  }, [isConversationComplete, extractedData, resetConversation]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
-        if (recording) {
-          console.log('📱 App went to background, stopping recording...');
-          stopRecording();
-        }
+        // No recording to stop anymore (handled by ConversationContext)
       } else if (nextAppState === 'active') {
         console.log('📱 App came to foreground, syncing dreams...');
 
@@ -405,110 +398,7 @@ export default function HomeScreen() {
     return () => {
       subscription.remove();
     };
-  }, [recording, activeJobId, isGenerating, transcript, user]);
-
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (recording) {
-      const animations = waveAnimations.map((anim) =>
-        Animated.loop(Animated.sequence([
-          Animated.timing(anim, { toValue: Math.random() * 0.8 + 0.2, duration: 300 + Math.random() * 200, useNativeDriver: false }),
-          Animated.timing(anim, { toValue: Math.random() * 0.8 + 0.2, duration: 300 + Math.random() * 200, useNativeDriver: false }),
-        ]))
-      );
-      animations.forEach(a => a.start());
-      return () => { animations.forEach(a => a.stop()); };
-    } else {
-      waveAnimations.forEach(a => a.setValue(0.3));
-    }
-  }, [recording, waveAnimations]);
-
-  const startRecording = async () => {
-    try {
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Required', 'Please allow microphone access to record your dreams.');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecording(recording);
-      setRecordingDuration(0);
-
-      const MAX_RECORDING_DURATION = 180;
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => {
-          const newDuration = prev + 1;
-          if (newDuration >= MAX_RECORDING_DURATION) {
-            console.log('⏰ Max recording duration reached (3 minutes), auto-stopping...');
-            stopRecording();
-            return prev;
-          }
-          return newDuration;
-        });
-      }, 1000);
-    } catch (e) {
-      console.error('Failed to start recording', e);
-      Alert.alert('Recording Error', 'Could not start recording. Please try again.');
-    }
-  };
-
-  const stopRecording = async () => {
-    if (!recording) return;
-
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-
-    setIsTranscribing(true);
-    setRecording(null);
-    setRecordingDuration(0);
-
-    try {
-      await recording.stopAndUnloadAsync();
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      const uri = recording.getURI();
-      if (!uri) {
-        Alert.alert('Error', 'Failed to save recording');
-        setIsTranscribing(false);
-        return;
-      }
-
-      const languageToUse = language || currentLanguage || 'en';
-      console.log('🎤 Transcribing with language:', languageToUse);
-
-      const result = await transcribeAudio(uri, languageToUse);
-      setTranscript(result);
-    } catch (e) {
-      console.error('Failed to transcribe audio:', e);
-      Alert.alert('Transcription Error', 'Could not transcribe your recording. Please try typing instead.');
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
+  }, [activeJobId, isGenerating, transcript, user]);
 
   const pickImage = async () => {
     if (selectedImages.length >= MAX_IMAGES) {
@@ -919,35 +809,33 @@ export default function HomeScreen() {
     <View style={{ flex: 1 }}>
       <StatusBar style="light" backgroundColor="transparent" translucent />
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.logoRow}>
-            <Image source={require('../../assets/images/logo.png')} style={styles.logoImg} />
-            <Text style={styles.logoWord}>Dream AI</Text>
-          </View>
+        {/* Fixed logo at top left */}
+        <View style={styles.logoRow}>
+          <Image source={require('../../assets/images/logotrans.png')} style={styles.logoImg} />
+          <Text style={styles.logoWord}>Dream AI</Text>
+        </View>
 
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Text ABOVE orb - reordered */}
+          <Text style={styles.prompt}>What did you dream?</Text>
+
+          {/* Orb in center */}
           <View style={styles.micContainer}>
-            <TouchableOpacity style={styles.micButton} onPress={recording ? stopRecording : startRecording} activeOpacity={0.8}>
-              <Image source={require('../../assets/images/mic.png')} style={styles.micIcon} />
-              {recording && (
-                <View style={styles.recIndicatorInside}><View style={styles.recDot} /><Text style={styles.recText}>REC</Text></View>
-              )}
+            <TouchableOpacity onPress={startConversation} activeOpacity={0.8}>
+              <DreamOrb state={orbState} />
             </TouchableOpacity>
-            {recording && (
-              <View style={styles.waveContainer}>
-                {waveAnimations.map((anim, i) => (
-                  <Animated.View key={i} style={[styles.waveLine, { height: anim.interpolate({ inputRange: [0, 1], outputRange: [8, 40] }) }]} />
-                ))}
-              </View>
+            {currentMessage && (
+              <Animated.Text style={styles.orbMessage}>
+                {currentMessage}
+              </Animated.Text>
             )}
           </View>
-
-          <Text style={styles.prompt}>What did you dream?</Text>
 
           <View style={styles.card}>
             <TextInput
               style={styles.transcriptTextInput}
               multiline
-              placeholder={isTranscribing ? 'Transcribing your voice...' : 'Describe your dream...'}
+              placeholder="Describe your dream..."
               placeholderTextColor="#ccc"
               value={transcript}
               onChangeText={setTranscript}
@@ -1107,21 +995,30 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { alignItems: 'center', paddingTop: 56, paddingHorizontal: 20, paddingBottom: 100 },
-  logoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 30, transform: [{ translateX: -22 }] },
-  logoImg: { width: 72, height: 64, resizeMode: 'contain', marginRight: 3 },
-  logoWord: { fontSize: 52, color: '#fff', fontWeight: Platform.OS === 'ios' ? '800' : 'bold', letterSpacing: 0.5 },
+  scrollContent: { alignItems: 'center', paddingTop: 120, paddingHorizontal: 20, paddingBottom: 100 },
+  logoRow: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  logoImg: { width: 50, height: 50, resizeMode: 'contain', marginRight: 3 },
+  logoWord: { fontSize: 28, color: '#fff', fontWeight: '500', letterSpacing: 0.5 },
 
-  micContainer: { alignItems: 'center', marginTop: 10, marginBottom: 18 },
-  micButton: { width: 200, height: 200, borderRadius: 100, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)', alignItems: 'center', justifyContent: 'center' },
-  micIcon: { width: 74, height: 74, tintColor: '#ffffff' },
-  recIndicatorInside: { position: 'absolute', bottom: 15, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ff4444', marginRight: 6 },
-  recText: { color: '#ffffff', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
-  waveContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 20, height: 50 },
-  waveLine: { width: 3, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 1.5, opacity: 0.9 },
+  micContainer: { alignItems: 'center', marginTop: 0, marginBottom: 40 },
+  orbMessage: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#ffffff',
+    opacity: 0.9,
+    textAlign: 'center',
+    maxWidth: '80%',
+    paddingHorizontal: 20,
+  },
 
-  prompt: { fontSize: 28, color: '#fff', marginBottom: 18, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
+  prompt: { fontSize: 28, color: '#fff', marginBottom: 24, marginTop: 35, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
   card: { backgroundColor: '#fff', borderRadius: 20, width: '100%', padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, minHeight: 600 },
 
   transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100 },
