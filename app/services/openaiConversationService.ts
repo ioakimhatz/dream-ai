@@ -146,49 +146,109 @@ export async function processConversationTurn(
   }
 }
 
-export function buildDreamPrompt(data: ExtractedDreamData): string {
-  // Combine all raw transcripts into a coherent dream description
-  const transcripts = data.rawTranscripts || [];
-
+/**
+ * Use GPT to synthesize a coherent dream description from all transcripts
+ * Cost: ~$0.001 per call (negligible compared to conversation cost)
+ */
+async function synthesizeDreamPrompt(transcripts: string[]): Promise<string> {
   if (transcripts.length === 0) {
     return '';
   }
 
-  // If we have structured data, build a nice prompt
-  if (data.subject || data.setting || data.emotions) {
-    let prompt = 'I dreamed ';
-
-    if (data.subject) {
-      prompt += data.subject;
-    }
-
-    if (data.setting && !data.subject?.toLowerCase().includes(data.setting.toLowerCase())) {
-      // Extract location from setting
-      const settingLower = data.setting.toLowerCase();
-      if (settingLower.includes(' at ') || settingLower.includes(' in ') || settingLower.includes(' on ')) {
-        prompt += ` ${data.setting}`;
-      } else {
-        prompt += `. ${data.setting}`;
-      }
-    }
-
-    if (data.emotions && !prompt.toLowerCase().includes(data.emotions.toLowerCase())) {
-      prompt += `. It felt ${data.emotions}`;
-    }
-
-    // Add any remaining details from transcripts that weren't captured
-    const combinedText = prompt.toLowerCase();
-    transcripts.forEach(t => {
-      const tLower = t.toLowerCase();
-      // If transcript has unique info not in prompt, append it
-      if (!combinedText.includes(tLower.substring(0, Math.min(20, tLower.length)))) {
-        prompt += `. ${t}`;
-      }
-    });
-
-    return prompt.trim();
+  // If only one transcript, just use it directly
+  if (transcripts.length === 1) {
+    return `I dreamed ${transcripts[0]}`;
   }
 
-  // Fallback: just combine all transcripts
-  return transcripts.join('. ').trim();
+  const conversationContext = transcripts.map((t, i) => `${i + 1}. ${t}`).join('\n');
+
+  const synthesisPrompt = `You are helping create a dream video. The user had a conversation about their dream, answering questions one by one. Synthesize ALL the details they provided into ONE coherent dream description.
+
+User's responses in order:
+${conversationContext}
+
+Requirements:
+- Start with "I dreamed"
+- Combine ALL details into a natural, flowing description
+- Include ALL people, places, objects, colors, emotions mentioned
+- Make it read like a story, not a list
+- Keep it under 200 words
+- DO NOT ask questions or add things the user didn't say
+
+Example:
+Input:
+1. I was in a mustang with a blonde girl
+2. Red
+3. Miami
+4. The coast
+
+Output:
+I dreamed I was driving a red Mustang with a blonde girl along the Miami coast.
+
+Now synthesize this dream:`;
+
+  try {
+    const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You synthesize dream descriptions from conversation fragments. Be concise and natural.'
+          },
+          {
+            role: 'user',
+            content: synthesisPrompt
+          }
+        ],
+        max_tokens: 200,
+        temperature: 0.3, // Lower temperature for consistent, accurate synthesis
+      }),
+    });
+
+    const data = await response.json();
+    const synthesizedPrompt = data.choices[0]?.message?.content?.trim() || '';
+
+    console.log('🎨 GPT synthesized dream prompt:', synthesizedPrompt);
+
+    // Fallback if GPT fails or returns empty
+    if (!synthesizedPrompt) {
+      console.warn('⚠️ GPT synthesis failed, using fallback');
+      return `I dreamed ${transcripts.join('. ')}`;
+    }
+
+    return synthesizedPrompt;
+
+  } catch (error) {
+    console.error('❌ Error synthesizing dream prompt:', error);
+    // Fallback: just join transcripts
+    return `I dreamed ${transcripts.join('. ')}`;
+  }
+}
+
+/**
+ * Build final dream prompt from extracted data
+ * Now uses GPT synthesis for better quality
+ */
+export async function buildDreamPrompt(data: ExtractedDreamData): Promise<string> {
+  const transcripts = data.rawTranscripts || [];
+
+  if (transcripts.length === 0) {
+    console.warn('⚠️ No transcripts available for dream prompt');
+    return '';
+  }
+
+  console.log('📝 Building dream prompt from transcripts:', transcripts);
+
+  // Use GPT to synthesize a coherent prompt from all transcripts
+  const synthesizedPrompt = await synthesizeDreamPrompt(transcripts);
+
+  return synthesizedPrompt;
 }

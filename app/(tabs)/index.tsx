@@ -304,13 +304,16 @@ export default function HomeScreen() {
   // Auto-fill text box when conversation is complete
   useEffect(() => {
     if (isConversationComplete && extractedData) {
-      const dreamDescription = buildDreamPrompt(extractedData);
-      console.log('✅ Conversation complete, auto-filling text box:', dreamDescription);
-      setTranscript(dreamDescription);
-      // Reset conversation for next time
-      setTimeout(() => {
-        resetConversation();
-      }, 1000);
+      // Make this async
+      (async () => {
+        const dreamDescription = await buildDreamPrompt(extractedData);
+        console.log('✅ Conversation complete, auto-filling text box:', dreamDescription);
+        setTranscript(dreamDescription);
+
+        setTimeout(() => {
+          resetConversation();
+        }, 1000);
+      })();
     }
   }, [isConversationComplete, extractedData, resetConversation]);
 

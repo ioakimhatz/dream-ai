@@ -74,6 +74,8 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
   const hasDetectedSpeechRef = useRef(false);
   const conversationDurationRef = useRef(0);
   const conversationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // ✅ FIX: Track extractedData in ref to avoid state desync issues
+  const extractedDataRef = useRef<ExtractedDreamData>({ rawTranscripts: [] });
 
   // Stop recording and return URI
   const stopRecordingInternal = useCallback(async () => {
@@ -156,13 +158,19 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       const newTurnCount = turnCount + 1;
       setTurnCount(newTurnCount);
 
+      // ✅ FIX: Use ref to get latest extractedData (avoids state desync)
+      console.log('🔍 DEBUG: extractedDataRef.current before processConversationTurn:', extractedDataRef.current.rawTranscripts);
+
       // ✅ KEEP ORB IN THINKING STATE during GPT processing
       const response = await processConversationTurn(
         messages,
         transcript,
-        extractedData || { rawTranscripts: [] },
+        extractedDataRef.current, // ✅ FIX: Use ref instead of state
         newTurnCount
       );
+
+      // ✅ ADD DEBUG LOG
+      console.log('🔍 DEBUG: processTurn response.extractedData.rawTranscripts:', response.extractedData.rawTranscripts);
 
       // Update state
       setMessages(prev => [
@@ -171,6 +179,9 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
         { role: 'assistant', content: response.question },
       ]);
       setExtractedData(response.extractedData);
+      // ✅ FIX: Sync the ref with the state immediately
+      extractedDataRef.current = response.extractedData;
+      console.log('🔍 DEBUG: Updated extractedDataRef, rawTranscripts:', response.extractedData.rawTranscripts);
 
       // Check if conversation is complete
       const isComplete = response.isComplete || newTurnCount >= MAX_TURNS;
@@ -182,7 +193,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
         shouldAutoResumeRef.current = false;
 
         // Build final dream prompt
-        const dreamPrompt = buildDreamPrompt(response.extractedData);
+        const dreamPrompt = await buildDreamPrompt(response.extractedData);
         console.log('📝 Final dream prompt:', dreamPrompt);
 
         // Speak completion message
@@ -231,7 +242,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       setIsConversationActive(false);
       shouldAutoResumeRef.current = false;
     }
-  }, [turnCount, messages, extractedData, onDreamPromptReady]);
+  }, [turnCount, messages, onDreamPromptReady]); // ✅ FIX: Removed extractedData from deps since we use ref now
 
   // Monitor audio levels for Voice Activity Detection (VAD)
   const monitorAudioLevels = useCallback((recording: Audio.Recording) => {
@@ -487,7 +498,8 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     }
 
     // Build whatever dream prompt we have so far
-    const dreamPrompt = buildDreamPrompt(extractedData || { rawTranscripts: [] });
+    // ✅ FIX: Use ref to get latest extractedData
+    const dreamPrompt = await buildDreamPrompt(extractedDataRef.current);
     console.log('📝 Final dream prompt (time limit):', dreamPrompt);
 
     // Set as complete
@@ -511,7 +523,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     });
 
     soundRef.current = sound;
-  }, [extractedData, onDreamPromptReady, stopRecordingInternal]);
+  }, [onDreamPromptReady, stopRecordingInternal]); // ✅ FIX: Removed extractedData from deps since we use ref now
 
   // Start conversation (called when user taps orb first time)
   const startConversation = useCallback(async () => {
@@ -622,6 +634,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
 
     setMessages([]);
     setExtractedData(null);
+    extractedDataRef.current = { rawTranscripts: [] }; // ✅ FIX: Reset ref too
     setTurnCount(0);
     setCurrentMessage(null);
     setIsConversationComplete(false);
