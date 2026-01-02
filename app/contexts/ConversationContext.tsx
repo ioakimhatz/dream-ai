@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
 import { Audio } from 'expo-av';
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   processConversationTurn,
   buildDreamPrompt,
@@ -25,6 +26,7 @@ interface ConversationContextType {
   startConversation: () => Promise<void>;
   stopConversation: () => void;
   resetConversation: () => void;
+  resetRateLimit?: () => Promise<void>; // ✅ NEW: Optional for testing
   onDreamPromptReady?: (prompt: string) => void;
 }
 
@@ -47,6 +49,10 @@ const MAX_TURN_DURATION = 10; // 10 seconds max per turn (cost protection)
 const SILENCE_THRESHOLD = -30; // dB level for silence detection
 const SILENCE_DURATION = 1.5; // 1.5 seconds of silence triggers auto-stop
 const MAX_TURNS = 5; // Maximum conversation exchanges
+const INITIAL_SPEECH_TIMEOUT = 5; // 5 seconds to start speaking
+const MAX_CONVERSATION_DURATION = 90; // 90 seconds (1.5 minutes)
+const CONVERSATION_COOLDOWN_HOURS = 24; // 24 hours between conversations
+const STORAGE_KEY_LAST_CONVERSATION = '@dream_ai_last_conversation_time';
 
 export function ConversationProvider({ children, onDreamPromptReady }: ConversationProviderProps) {
   const [orbState, setOrbState] = useState<OrbState>('idle');
@@ -64,6 +70,10 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
   const recordingDurationRef = useRef(0);
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const shouldAutoResumeRef = useRef(false);
+  const initialSpeechTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasDetectedSpeechRef = useRef(false);
+  const conversationDurationRef = useRef(0);
+  const conversationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Stop recording and return URI
   const stopRecordingInternal = useCallback(async () => {
@@ -82,6 +92,12 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
+      }
+
+      // ✅ NEW: Clear initial speech timeout
+      if (initialSpeechTimerRef.current) {
+        clearTimeout(initialSpeechTimerRef.current);
+        initialSpeechTimerRef.current = null;
       }
 
       const recording = recordingRef.current;
@@ -254,6 +270,16 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
               console.log(`🎤 Speech detected: ${audioLevel.toFixed(1)} dB - resetting silence counter`);
             }
             silenceCounterRef.current = 0;
+
+            // ✅ NEW: First speech detected - clear the "no speech" timeout
+            if (!hasDetectedSpeechRef.current) {
+              hasDetectedSpeechRef.current = true;
+              if (initialSpeechTimerRef.current) {
+                clearTimeout(initialSpeechTimerRef.current);
+                initialSpeechTimerRef.current = null;
+                console.log('✅ First speech detected - cleared no-speech timeout');
+              }
+            }
           }
 
           // ✅ FIX: Stop after 1.5s silence AND minimum 0.5s recording
@@ -364,6 +390,30 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       // Start audio level monitoring for VAD
       monitorAudioLevels(recording);
 
+      // ✅ NEW: Start "no speech detected" timeout
+      hasDetectedSpeechRef.current = false;
+      initialSpeechTimerRef.current = setTimeout(() => {
+        console.log('⏱️ No speech detected after 5 seconds, closing conversation...');
+
+        // Stop recording
+        stopRecordingInternal().then(() => {
+          // Stop conversation and show message
+          setOrbState('idle');
+          setCurrentMessage(null);
+          setIsConversationActive(false);
+          shouldAutoResumeRef.current = false;
+
+          // Show alert to user
+          Alert.alert(
+            'No Speech Detected',
+            'Please tap the orb and speak your dream when ready.',
+            [{ text: 'OK' }]
+          );
+        });
+      }, INITIAL_SPEECH_TIMEOUT * 1000);
+
+      console.log(`⏱️ Started ${INITIAL_SPEECH_TIMEOUT}s timeout for initial speech detection`);
+
       // Start duration timer (max 10 seconds per turn)
       durationTimerRef.current = setInterval(() => {
         recordingDurationRef.current += 1;
@@ -387,14 +437,128 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     }
   }, [monitorAudioLevels, stopRecordingInternal, processTurn]);
 
+  // Check if user can start a new conversation (rate limiting)
+  const canStartConversation = useCallback(async (): Promise<boolean> => {
+    try {
+      const lastConversationTime = await AsyncStorage.getItem(STORAGE_KEY_LAST_CONVERSATION);
+
+      if (!lastConversationTime) {
+        // First time user, allow conversation
+        return true;
+      }
+
+      const lastTime = parseInt(lastConversationTime, 10);
+      const now = Date.now();
+      const hoursSinceLastConversation = (now - lastTime) / (1000 * 60 * 60);
+
+      console.log(`⏱️ Hours since last conversation: ${hoursSinceLastConversation.toFixed(2)} / ${CONVERSATION_COOLDOWN_HOURS}`);
+
+      if (hoursSinceLastConversation >= CONVERSATION_COOLDOWN_HOURS) {
+        // Cooldown period has passed
+        return true;
+      }
+
+      // Still in cooldown period
+      const hoursRemaining = CONVERSATION_COOLDOWN_HOURS - hoursSinceLastConversation;
+      const minutesRemaining = Math.ceil(hoursRemaining * 60);
+
+      Alert.alert(
+        'Daily Limit Reached',
+        `You've used your daily dream conversation. Come back in ${minutesRemaining} minutes!`,
+        [{ text: 'OK' }]
+      );
+
+      return false;
+    } catch (error) {
+      console.error('❌ Error checking conversation rate limit:', error);
+      // On error, allow conversation (fail open)
+      return true;
+    }
+  }, []);
+
+  // Force conversation completion when time limit reached
+  const forceConversationCompletion = useCallback(async () => {
+    console.log('⏰ Forcing conversation completion due to time limit...');
+
+    // Stop any active recording
+    shouldAutoResumeRef.current = false;
+    if (recordingRef.current) {
+      await stopRecordingInternal();
+    }
+
+    // Build whatever dream prompt we have so far
+    const dreamPrompt = buildDreamPrompt(extractedData || { rawTranscripts: [] });
+    console.log('📝 Final dream prompt (time limit):', dreamPrompt);
+
+    // Set as complete
+    setIsConversationComplete(true);
+    setIsConversationActive(false);
+
+    // Speak completion message
+    setOrbState('speaking');
+    setCurrentMessage('Time\'s up! Let me create your dream with what you\'ve told me.');
+
+    // ✅ Use completion callback for smooth transition
+    const sound = await speakText('Time\'s up! Let me create your dream with what you\'ve told me.', () => {
+      // This runs when TTS actually finishes playing
+      console.log('🔊 Time limit completion message finished');
+      setOrbState('idle');
+      setCurrentMessage(null);
+
+      if (onDreamPromptReady) {
+        onDreamPromptReady(dreamPrompt);
+      }
+    });
+
+    soundRef.current = sound;
+  }, [extractedData, onDreamPromptReady, stopRecordingInternal]);
+
   // Start conversation (called when user taps orb first time)
   const startConversation = useCallback(async () => {
     try {
+      // ✅ NEW: Check rate limit before starting
+      const canStart = await canStartConversation();
+      if (!canStart) {
+        console.log('⛔ Conversation blocked by rate limit');
+        return;
+      }
+
       console.log('🎬 Starting continuous voice conversation...');
 
       setIsConversationActive(true);
       shouldAutoResumeRef.current = true;
       setCurrentMessage('I\'m listening...');
+
+      // ✅ NEW: Save conversation start time for rate limiting
+      try {
+        await AsyncStorage.setItem(STORAGE_KEY_LAST_CONVERSATION, Date.now().toString());
+        console.log('✅ Conversation timestamp saved for rate limiting');
+      } catch (error) {
+        console.error('❌ Error saving conversation timestamp:', error);
+      }
+
+      // ✅ NEW: Start overall conversation duration timer
+      conversationDurationRef.current = 0;
+      conversationTimerRef.current = setInterval(() => {
+        conversationDurationRef.current += 1;
+        console.log(`⏱️ Conversation duration: ${conversationDurationRef.current}s / ${MAX_CONVERSATION_DURATION}s`);
+
+        // Check if max duration reached
+        if (conversationDurationRef.current >= MAX_CONVERSATION_DURATION) {
+          console.log('⏱️ Max conversation duration (1.5 minutes) reached, forcing completion...');
+
+          // Clear the timer
+          if (conversationTimerRef.current) {
+            clearInterval(conversationTimerRef.current);
+            conversationTimerRef.current = null;
+          }
+
+          // Force conversation completion
+          forceConversationCompletion();
+        }
+      }, 1000); // Check every second
+
+      console.log(`⏱️ Started conversation timer - max duration: ${MAX_CONVERSATION_DURATION}s`);
 
       await startRecordingInternal();
     } catch (error) {
@@ -403,7 +567,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       setOrbState('idle');
       setIsConversationActive(false);
     }
-  }, [startRecordingInternal]);
+  }, [startRecordingInternal, forceConversationCompletion, canStartConversation]);
 
   // Stop conversation (user can tap orb during conversation to stop)
   const stopConversation = useCallback(() => {
@@ -433,6 +597,18 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       durationTimerRef.current = null;
     }
 
+    if (initialSpeechTimerRef.current) {
+      clearTimeout(initialSpeechTimerRef.current);
+      initialSpeechTimerRef.current = null;
+    }
+
+    // ✅ NEW: Clear conversation timer
+    if (conversationTimerRef.current) {
+      clearInterval(conversationTimerRef.current);
+      conversationTimerRef.current = null;
+    }
+    conversationDurationRef.current = 0;
+
     setOrbState('idle');
     setIsConversationActive(false);
     setCurrentMessage(null);
@@ -449,7 +625,21 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     setTurnCount(0);
     setCurrentMessage(null);
     setIsConversationComplete(false);
+
+    // ✅ NEW: Ensure conversation duration is reset
+    conversationDurationRef.current = 0;
   }, [stopConversation]);
+
+  // Admin function to reset rate limit (for testing)
+  const resetRateLimit = useCallback(async () => {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY_LAST_CONVERSATION);
+      console.log('✅ Rate limit reset');
+      Alert.alert('Rate Limit Reset', 'You can now start a new conversation.');
+    } catch (error) {
+      console.error('❌ Error resetting rate limit:', error);
+    }
+  }, []);
 
   return (
     <ConversationContext.Provider
@@ -464,6 +654,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
         startConversation,
         stopConversation,
         resetConversation,
+        resetRateLimit, // ✅ NEW: For testing only
       }}
     >
       {children}

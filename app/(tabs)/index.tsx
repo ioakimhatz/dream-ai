@@ -159,6 +159,7 @@ export default function HomeScreen() {
     extractedData,
     currentMessage,
     resetConversation,
+    resetRateLimit, // ✅ NEW: For testing
   } = useConversation();
 
   useEffect(() => {
@@ -814,6 +815,24 @@ export default function HomeScreen() {
           <Image source={require('../../assets/images/logotrans.png')} style={styles.logoImg} />
           <Text style={styles.logoWord}>Dream AI</Text>
         </View>
+
+        {/* DEBUG: Hidden button to reset rate limit (for testing only) */}
+        {__DEV__ && (
+          <TouchableOpacity
+            onPress={() => resetRateLimit?.()}
+            style={{
+              position: 'absolute',
+              top: 60,
+              right: 20,
+              width: 50,
+              height: 50,
+              opacity: 0.01, // Nearly invisible
+              zIndex: 100,
+            }}
+          >
+            <Text style={{ fontSize: 10, color: 'white' }}>Reset</Text>
+          </TouchableOpacity>
+        )}
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Text ABOVE orb - reordered */}
