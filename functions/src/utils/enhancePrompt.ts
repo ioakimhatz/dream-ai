@@ -92,10 +92,10 @@ TYPE A: NANO BANANA (Image Generation)
 
 TYPE B: KLING (Video Generation)
 - Purpose: Animate the image with motion/context
-- Length: 30-50+ words (MORE is better)
-- Focus: Action + Atmosphere + Motion + Scale + Context
-- Style: Rich, cinematic, atmospheric
-- Include: Motion description, emotional tone, camera perspective, environmental details
+- Length: 15-30 words (CONCISE for motion quality)
+- Focus: Core action + key atmosphere + critical details
+- Style: Clear, direct, essential context only
+- Avoid: Excessive camera directions, too many modifiers
 
 ═══════════════════════════════════════════════════════════════════════
 📐 SCENE PROGRESSION PATTERN:
@@ -128,11 +128,11 @@ Output:
     "Taylor Swift towering over person, tall heels prominent"
   ],
   "kling": [
-    "intimate dancing with Taylor Swift in crowded nightclub, electric atmosphere with neon lights, Taylor wearing tall heels, people dancing in background, close connection between dancers",
+    "dancing intimately with Taylor Swift in nightclub, neon lights, Taylor in tall heels, crowd around them",
 
-    "close dancing with Taylor Swift who's wearing extremely tall heels making her significantly taller than camera perspective, club atmosphere intensifying, dramatic height difference becoming pronounced, neon lights flickering, crowd around them",
+    "dancing with Taylor Swift in extremely tall heels, dramatic height difference pronounced, club atmosphere, neon lights",
 
-    "Taylor Swift towering over camera perspective from extremely tall heels, intimate club setting showing final moment of dance, full height difference emphasized from low angle, towering presence dominating the frame, club lights illuminating her elevated position"
+    "Taylor Swift towering over person from tall heels, full height difference, club setting, low camera angle"
   ]
 }
 
@@ -140,7 +140,7 @@ Why good:
 ✅ "tall heels" preserved in ALL 6 prompts
 ✅ Height PROGRESSION: normal → height difference → towering
 ✅ Nano Banana: 10-15 words, visual focus
-✅ Kling: 30-50 words, rich context
+✅ Kling: 15-20 words, concise motion context
 ✅ Scene 1→2→3 shows clear progression
 
 ═══════════════════════════════════════════════════════════════════════
@@ -159,11 +159,11 @@ Output:
     "person discovering ancient technology in crystal caves, glowing creatures everywhere"
   ],
   "kling": [
-    "person beginning to fly into massive crystal caves in Agartha, bioluminescent creatures glowing softly in the darkness, camera following from behind as vast crystalline structures tower overhead, ethereal atmosphere with shimmering light reflections",
+    "person flying into crystal caves in Agartha, glowing creatures nearby, ethereal atmosphere",
 
-    "person flying deeper through crystal caves surrounded by swarms of glowing creatures, mysterious ancient technology becoming visible in the distance, camera perspective showing speed of flight, crystals blurring past, atmosphere becoming more intense and mystical, creatures following in wake",
+    "person flying through crystal caves with glowing creatures, ancient technology visible in distance, crystals all around",
 
-    "person reaching ancient alien technology deep in crystal caves of Agartha, glowing creatures swarming all around illuminating the discovery, camera circling to show the scale of the technological structure embedded in massive crystals, culminating moment of wonder and discovery, ethereal glow intensifying"
+    "person reaching ancient technology in crystal caves of Agartha, glowing creatures swarming, illuminating discovery"
   ]
 }
 
@@ -171,7 +171,7 @@ Why good:
 ✅ ALL details preserved (flying, caves, Agartha, creatures, technology)
 ✅ Discovery PROGRESSION: entering → flying through → discovering
 ✅ Nano Banana: 10-18 words, concrete visuals
-✅ Kling: 40-60 words, immersive context
+✅ Kling: 15-20 words, concise essential context
 
 ═══════════════════════════════════════════════════════════════════════
 ❌ BAD EXAMPLE (What NOT to do):
@@ -211,9 +211,9 @@ Return ONLY valid JSON (no markdown, no backticks):
     "scene 3 nano banana prompt (10-20 words)"
   ],
   "kling": [
-    "scene 1 kling prompt (30-50+ words, rich detail)",
-    "scene 2 kling prompt (30-50+ words, rich detail)",
-    "scene 3 kling prompt (30-50+ words, rich detail)"
+    "scene 1 kling prompt (15-30 words, concise)",
+    "scene 2 kling prompt (15-30 words, concise)",
+    "scene 3 kling prompt (15-30 words, concise)"
   ]
 }
 
@@ -223,7 +223,7 @@ Return ONLY valid JSON (no markdown, no backticks):
 1. PRESERVE EVERY DETAIL mentioned in input
 2. CREATE PROGRESSION based on scenario (height, motion, discovery, etc.)
 3. Nano Banana = SHORT visual snapshots (10-20 words)
-4. Kling = RICH cinematic context (30-50+ words, MORE is better)
+4. Kling = CONCISE motion context (15-30 words, QUALITY over quantity)
 5. NEVER add emotions/feelings not in the original input
 6. ALWAYS maintain specific names, objects, and settings`;
 

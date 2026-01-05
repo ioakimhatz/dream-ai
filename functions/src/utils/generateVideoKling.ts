@@ -285,7 +285,7 @@ async function klingI2V(prompt: string, imageUrl: string): Promise<{ localUri: s
     duration: DURATION,
     cfg_scale: CFG,
     aspect_ratio: "9:16",
-    audio: false,  // ✅ CRITICAL: Disable audio to save 50% cost ($0.60 → $0.30 per 5s clip)
+    generate_audio: false,  // ✅ FIXED: Correct parameter name (saves 50% cost)
     negative_prompt: KLING_NEGATIVE_PROMPT,
   };
 
@@ -341,7 +341,7 @@ async function klingTextToVideo(prompt: string): Promise<{ localUri: string; cov
     duration: DURATION,
     cfg_scale: CFG,
     aspect_ratio: "9:16",
-    audio: false,  // ✅ CRITICAL: Disable audio to save 50% cost ($0.60 → $0.30 per 5s clip)
+    generate_audio: false,  // ✅ FIXED: Correct parameter name (saves 50% cost)
     negative_prompt: KLING_NEGATIVE_PROMPT,
   };
 
@@ -403,7 +403,7 @@ async function klingTextToVideo10s(prompt: string): Promise<{
     duration: DURATION_MEDIUM, // 🔥 10 seconds!
     cfg_scale: CFG,
     aspect_ratio: "9:16",
-    audio: false,  // ✅ CRITICAL: Disable audio to save 50% cost
+    generate_audio: false,  // ✅ FIXED: Correct parameter name (saves 50% cost)
     negative_prompt: KLING_NEGATIVE_PROMPT,
   };
 
