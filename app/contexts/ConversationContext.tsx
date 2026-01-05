@@ -5,7 +5,6 @@ import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   processConversationTurn,
-  buildDreamPrompt,
   ConversationMessage,
   ExtractedDreamData,
 } from '../services/openaiConversationService';
@@ -22,6 +21,7 @@ interface ConversationContextType {
   extractedData: ExtractedDreamData | null;
   messages: ConversationMessage[];
   turnCount: number;
+  currentAudioLevel: number;  // ✅ NEW: Audio level for orb reactivity
 
   startConversation: () => Promise<void>;
   stopConversation: () => void;
@@ -62,6 +62,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
   const [extractedData, setExtractedData] = useState<ExtractedDreamData | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [turnCount, setTurnCount] = useState(0);
+  const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ✅ NEW: Audio level for orb reactivity
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -76,6 +77,14 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
   const conversationTimerRef = useRef<NodeJS.Timeout | null>(null);
   // ✅ FIX: Track extractedData in ref to avoid state desync issues
   const extractedDataRef = useRef<ExtractedDreamData>({ rawTranscripts: [] });
+  // ✅ NEW: Track speech audio simulation
+  const speechPulseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // ✅ NEW: Track consecutive silent turns
+  const consecutiveSilentTurnsRef = useRef(0);
+  // ✅ FIX: Track isConversationActive in ref to avoid closure issues in TTS callbacks
+  const isConversationActiveRef = useRef(false);
+  // ✅ FIX: Track turnCount in ref for immediate updates (state has delay)
+  const turnCountRef = useRef(0);
 
   // Stop recording and return URI
   const stopRecordingInternal = useCallback(async () => {
@@ -127,6 +136,30 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     }
   }, []);
 
+  // ✅ NEW: Simulate realistic speech audio pattern (syllables + pauses)
+  const startSpeechAudioSimulation = useCallback(() => {
+    let speechPulseCounter = 0;
+
+    speechPulseTimerRef.current = setInterval(() => {
+      // Realistic speech pattern with variation
+      const syllablePulse = Math.random() * 0.7 + 0.3; // 0.3-1.0 random syllables
+      const breathingWave = Math.sin(speechPulseCounter * 0.2) * 0.2 + 0.6; // 0.4-0.8 wave
+      const finalLevel = (syllablePulse * 0.6) + (breathingWave * 0.4); // Blend random + wave
+
+      setCurrentAudioLevel(Math.min(1, finalLevel));
+      speechPulseCounter++;
+    }, 80); // 80ms = responsive to orb physics
+  }, []);
+
+  // ✅ NEW: Stop speech audio simulation
+  const stopSpeechAudioSimulation = useCallback(() => {
+    if (speechPulseTimerRef.current) {
+      clearInterval(speechPulseTimerRef.current);
+      speechPulseTimerRef.current = null;
+    }
+    setCurrentAudioLevel(0);
+  }, []);
+
   // Process a conversation turn (transcribe + AI response + TTS)
   const processTurn = useCallback(async (audioUri: string) => {
     try {
@@ -154,20 +187,23 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       // ✅ NEW: Update message but KEEP thinking state during GPT processing
       setCurrentMessage('Processing your dream...');
 
-      // Process conversation turn
-      const newTurnCount = turnCount + 1;
-      setTurnCount(newTurnCount);
-
       // ✅ FIX: Use ref to get latest extractedData (avoids state desync)
       console.log('🔍 DEBUG: extractedDataRef.current before processConversationTurn:', extractedDataRef.current.rawTranscripts);
+      console.log('🔍 DEBUG: turnCountRef.current before processConversationTurn:', turnCountRef.current);
 
       // ✅ KEEP ORB IN THINKING STATE during GPT processing
       const response = await processConversationTurn(
         messages,
         transcript,
         extractedDataRef.current, // ✅ FIX: Use ref instead of state
-        newTurnCount
+        turnCountRef.current  // ✅ FIX: Use ref for immediate current value (not stale state)
       );
+
+      // ✅ FIX: Use turnCount from response and update BOTH state and ref
+      const newTurnCount = response.turnCount;
+      setTurnCount(newTurnCount);  // For UI display
+      turnCountRef.current = newTurnCount;  // ✅ For immediate use in next call
+      console.log('🔍 DEBUG: Updated turnCount to:', newTurnCount);
 
       // ✅ ADD DEBUG LOG
       console.log('🔍 DEBUG: processTurn response.extractedData.rawTranscripts:', response.extractedData.rawTranscripts);
@@ -186,31 +222,45 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       // Check if conversation is complete
       const isComplete = response.isComplete || newTurnCount >= MAX_TURNS;
 
+      console.log('🔍 DEBUG COMPLETION CHECK IN PROCESSTURN:');
+      console.log('  - response.isComplete:', response.isComplete);
+      console.log('  - newTurnCount:', newTurnCount);
+      console.log('  - MAX_TURNS:', MAX_TURNS);
+      console.log('  - isComplete:', isComplete);
+      console.log('  - response.question:', response.question);
+
       if (isComplete) {
-        console.log('✅ Conversation complete!');
+        console.log('✅ Conversation marked as COMPLETE!');
+        console.log('🔍 WHY: response.isComplete =', response.isComplete, ', turnCount =', newTurnCount);
         setIsConversationComplete(true);
         setIsConversationActive(false);
+        isConversationActiveRef.current = false; // ✅ Sync ref
         shouldAutoResumeRef.current = false;
 
-        // Build final dream prompt
-        const dreamPrompt = await buildDreamPrompt(response.extractedData);
-        console.log('📝 Final dream prompt:', dreamPrompt);
+        // ✅ FIX: Don't build dream prompt here - let index.tsx useEffect handle it
+        // This avoids duplicate GPT calls
 
         // Speak completion message
-        setOrbState('speaking');
-        setCurrentMessage('Great! I have everything I need.');
+        setOrbState('thinking'); // ✅ Start in thinking while TTS generates
 
-        // ✅ FIX: Use completion callback instead of timeout
-        const sound = await speakText('Great! I have everything I need.', () => {
-          // This runs when TTS actually finishes playing
-          console.log('🔊 Completion message finished, transitioning to idle...');
-          setOrbState('idle');
-          setCurrentMessage(null);
-
-          if (onDreamPromptReady) {
-            onDreamPromptReady(dreamPrompt);
+        // ✅ Use onStart/onComplete callbacks
+        const sound = await speakText(
+          'Great! I have everything I need.',
+          // onComplete
+          () => {
+            // This runs when TTS actually finishes playing
+            console.log('🔊 Completion message finished, transitioning to idle...');
+            stopSpeechAudioSimulation(); // ✅ Stop speech audio pattern
+            setOrbState('idle');
+            setCurrentMessage(null);
+          },
+          // onStart - ✅ Show text when audio starts
+          () => {
+            setOrbState('speaking');
+            setCurrentMessage('Great! I have everything I need.');
+            startSpeechAudioSimulation(); // ✅ Start speech audio pattern
           }
-        });
+        );
 
         soundRef.current = sound;
 
@@ -218,31 +268,60 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       }
 
       // Speak AI's question
-      setOrbState('speaking');
-      setCurrentMessage(response.question);
+      // ✅ FIX: Keep orb in thinking state while TTS generates
+      // Text won't show until audio ACTUALLY starts playing
+      setOrbState('thinking');
 
-      // ✅ FIX: Use completion callback instead of timeout
+      // ✅ FIX: Start TTS in parallel (don't await until we need to)
       shouldAutoResumeRef.current = true;
-      const sound = await speakText(response.question, () => {
-        // This runs when TTS actually finishes playing
-        console.log('🔊 TTS playback completed, auto-resuming...');
+      const speakPromise = speakText(
+        response.question,
+        // onComplete callback - runs when TTS finishes playing
+        () => {
+          console.log('🔊 TTS playback completed, checking if should auto-resume...');
+          console.log('🔍 shouldAutoResumeRef.current:', shouldAutoResumeRef.current);
+          console.log('🔍 isConversationActiveRef.current:', isConversationActiveRef.current);
 
-        if (shouldAutoResumeRef.current) {
-          console.log('🔄 Auto-resuming recording for next turn...');
-          setCurrentMessage('I\'m listening...');
-          startRecordingInternal(); // This will set orb to 'listening'
+          stopSpeechAudioSimulation(); // ✅ Stop speech audio pattern
+
+          // ✅ CRITICAL: Use REF not state to avoid closure issues
+          if (shouldAutoResumeRef.current && isConversationActiveRef.current) {
+            console.log('✅ Auto-resuming recording for next turn...');
+
+            // ✅ IMMEDIATELY show listening state for instant perceived feedback
+            // User sees the visual change right away, even if recording takes a moment to init
+            setOrbState('listening');
+            setCurrentMessage('I\'m listening...');
+
+            // Then start actual recording (may take 100-200ms to initialize)
+            // Visual feedback is already shown, so user can start speaking immediately
+            startRecordingInternal();
+          } else {
+            console.log('⛔ Auto-resume blocked');
+            console.log('  - shouldAutoResume:', shouldAutoResumeRef.current);
+            console.log('  - isConversationActive:', isConversationActiveRef.current);
+          }
+        },
+        // onStart callback - ✅ NEW: runs when audio STARTS playing
+        () => {
+          console.log('🔊 Audio started playing - showing text now');
+          setOrbState('speaking');
+          setCurrentMessage(response.question);
+          startSpeechAudioSimulation(); // ✅ Start realistic speech audio pattern
         }
-      });
+      );
 
+      const sound = await speakPromise;
       soundRef.current = sound;
     } catch (error) {
       console.error('❌ Error processing turn:', error);
       Alert.alert('Error', 'Failed to process your message. Please try again.');
       setOrbState('idle');
       setIsConversationActive(false);
+      isConversationActiveRef.current = false; // ✅ Sync ref
       shouldAutoResumeRef.current = false;
     }
-  }, [turnCount, messages, onDreamPromptReady]); // ✅ FIX: Removed extractedData from deps since we use ref now
+  }, [turnCount, messages, onDreamPromptReady, startSpeechAudioSimulation, stopSpeechAudioSimulation]); // ✅ FIX: Removed extractedData from deps since we use ref now
 
   // Monitor audio levels for Voice Activity Detection (VAD)
   const monitorAudioLevels = useCallback((recording: Audio.Recording) => {
@@ -282,9 +361,18 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
             }
             silenceCounterRef.current = 0;
 
+            // ✅ NEW: Update audio level for orb animation
+            // Normalize -35dB to 0dB range to 0-1 scale
+            const normalizedLevel = Math.min(1, Math.max(0, (audioLevel + 35) / 35));
+            setCurrentAudioLevel(normalizedLevel);
+
             // ✅ NEW: First speech detected - clear the "no speech" timeout
             if (!hasDetectedSpeechRef.current) {
               hasDetectedSpeechRef.current = true;
+
+              // Reset silent turn counter - user is responding!
+              consecutiveSilentTurnsRef.current = 0;
+
               if (initialSpeechTimerRef.current) {
                 clearTimeout(initialSpeechTimerRef.current);
                 initialSpeechTimerRef.current = null;
@@ -404,22 +492,56 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       // ✅ NEW: Start "no speech detected" timeout
       hasDetectedSpeechRef.current = false;
       initialSpeechTimerRef.current = setTimeout(() => {
-        console.log('⏱️ No speech detected after 5 seconds, closing conversation...');
+        console.log('⏱️ No speech detected after 5 seconds...');
+
+        // Increment silent turn counter
+        consecutiveSilentTurnsRef.current++;
+        console.log(`🔇 Silent turns: ${consecutiveSilentTurnsRef.current}/3`);
 
         // Stop recording
         stopRecordingInternal().then(() => {
-          // Stop conversation and show message
-          setOrbState('idle');
-          setCurrentMessage(null);
-          setIsConversationActive(false);
-          shouldAutoResumeRef.current = false;
+          // If this is the 3rd silent turn, close conversation
+          if (consecutiveSilentTurnsRef.current >= 3) {
+            console.log('⛔ Too many silent turns, closing conversation...');
 
-          // Show alert to user
-          Alert.alert(
-            'No Speech Detected',
-            'Please tap the orb and speak your dream when ready.',
-            [{ text: 'OK' }]
-          );
+            setOrbState('idle');
+            setCurrentMessage(null);
+            setIsConversationActive(false);
+            isConversationActiveRef.current = false; // ✅ Sync ref
+            shouldAutoResumeRef.current = false;
+
+            Alert.alert(
+              'Conversation Ended',
+              "You stopped responding. Tap the orb when you're ready to describe your dream!",
+              [{ text: 'OK' }]
+            );
+          } else {
+            // Try one more time with encouragement
+            setOrbState('thinking'); // ✅ Start in thinking while TTS generates
+            const encouragement = consecutiveSilentTurnsRef.current === 1
+              ? "I'm still here! Tell me about your dream."
+              : "Last chance - what did you dream about?";
+
+            speakText(
+              encouragement,
+              // onComplete
+              () => {
+                stopSpeechAudioSimulation(); // ✅ Stop speech audio pattern
+
+                if (shouldAutoResumeRef.current) {
+                  setOrbState('listening');
+                  setCurrentMessage("I'm listening...");
+                  startRecordingInternal();
+                }
+              },
+              // onStart - ✅ Show text when audio starts
+              () => {
+                setOrbState('speaking');
+                setCurrentMessage(encouragement);
+                startSpeechAudioSimulation(); // ✅ Start speech audio pattern
+              }
+            );
+          }
         });
       }, INITIAL_SPEECH_TIMEOUT * 1000);
 
@@ -491,39 +613,65 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
   const forceConversationCompletion = useCallback(async () => {
     console.log('⏰ Forcing conversation completion due to time limit...');
 
-    // Stop any active recording
+    // ✅ CRITICAL: Set shouldAutoResumeRef to false FIRST to prevent race condition
+    // This ensures any pending TTS callbacks from processTurn won't restart recording
     shouldAutoResumeRef.current = false;
+
+    // ✅ GUARD: Use ref to check if already completed (avoids closure issues)
+    if (!isConversationActiveRef.current) {
+      console.log('⚠️ Force completion called but conversation not active - ignoring');
+      return;
+    }
+
+    console.log('✅ Force completion proceeding - conversation is active');
+
+    // ✅ Immediately mark as inactive to prevent re-entry
+    setIsConversationActive(false);
+    isConversationActiveRef.current = false; // ✅ Sync ref
+
+    // Stop any active recording
     if (recordingRef.current) {
       await stopRecordingInternal();
     }
 
-    // Build whatever dream prompt we have so far
-    // ✅ FIX: Use ref to get latest extractedData
-    const dreamPrompt = await buildDreamPrompt(extractedDataRef.current);
-    console.log('📝 Final dream prompt (time limit):', dreamPrompt);
+    // Stop any active speech to prevent conflicts
+    if (soundRef.current) {
+      stopSpeaking(soundRef.current);
+      soundRef.current = null;
+    }
+
+    // ✅ FIX: Don't build dream prompt here - let index.tsx useEffect handle it
+    // This avoids duplicate GPT calls
 
     // Set as complete
     setIsConversationComplete(true);
     setIsConversationActive(false);
+    isConversationActiveRef.current = false; // ✅ Sync ref
 
     // Speak completion message
-    setOrbState('speaking');
-    setCurrentMessage('Time\'s up! Let me create your dream with what you\'ve told me.');
+    setOrbState('thinking'); // ✅ Start in thinking while TTS generates
 
-    // ✅ Use completion callback for smooth transition
-    const sound = await speakText('Time\'s up! Let me create your dream with what you\'ve told me.', () => {
-      // This runs when TTS actually finishes playing
-      console.log('🔊 Time limit completion message finished');
-      setOrbState('idle');
-      setCurrentMessage(null);
-
-      if (onDreamPromptReady) {
-        onDreamPromptReady(dreamPrompt);
+    // ✅ Use onStart/onComplete callbacks
+    const sound = await speakText(
+      'Time\'s up! Let me create your dream with what you\'ve told me.',
+      // onComplete
+      () => {
+        // This runs when TTS actually finishes playing
+        console.log('🔊 Time limit completion message finished');
+        stopSpeechAudioSimulation(); // ✅ Stop speech audio pattern
+        setOrbState('idle');
+        setCurrentMessage(null);
+      },
+      // onStart - ✅ Show text when audio starts
+      () => {
+        setOrbState('speaking');
+        setCurrentMessage('Time\'s up! Let me create your dream with what you\'ve told me.');
+        startSpeechAudioSimulation(); // ✅ Start speech audio pattern
       }
-    });
+    );
 
     soundRef.current = sound;
-  }, [onDreamPromptReady, stopRecordingInternal]); // ✅ FIX: Removed extractedData from deps since we use ref now
+  }, [isConversationActive, onDreamPromptReady, stopRecordingInternal, startSpeechAudioSimulation, stopSpeechAudioSimulation]); // ✅ FIX: Removed extractedData from deps since we use ref now
 
   // Start conversation (called when user taps orb first time)
   const startConversation = useCallback(async () => {
@@ -537,7 +685,11 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
 
       console.log('🎬 Starting continuous voice conversation...');
 
+      // ✅ Reset silent turn counter
+      consecutiveSilentTurnsRef.current = 0;
+
       setIsConversationActive(true);
+      isConversationActiveRef.current = true; // ✅ Sync ref
       shouldAutoResumeRef.current = true;
       setCurrentMessage('I\'m listening...');
 
@@ -559,13 +711,16 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
         if (conversationDurationRef.current >= MAX_CONVERSATION_DURATION) {
           console.log('⏱️ Max conversation duration (1.5 minutes) reached, forcing completion...');
 
-          // Clear the timer
+          // ✅ CRITICAL: Clear timer FIRST to prevent multiple triggers
           if (conversationTimerRef.current) {
             clearInterval(conversationTimerRef.current);
             conversationTimerRef.current = null;
           }
 
-          // Force conversation completion
+          // ✅ Reset duration to prevent re-trigger
+          conversationDurationRef.current = 0;
+
+          // Force conversation completion (now safe - can only happen once)
           forceConversationCompletion();
         }
       }, 1000); // Check every second
@@ -578,18 +733,20 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       Alert.alert('Error', 'Failed to start conversation. Please try again.');
       setOrbState('idle');
       setIsConversationActive(false);
+      isConversationActiveRef.current = false; // ✅ Sync ref
     }
   }, [startRecordingInternal, forceConversationCompletion, canStartConversation]);
 
   // Stop conversation (user can tap orb during conversation to stop)
-  const stopConversation = useCallback(() => {
-    console.log('🛑 Stopping conversation...');
+  const stopConversation = useCallback(async () => {
+    console.log('🛑 User stopped conversation - completing with current data...');
 
+    stopSpeechAudioSimulation();
     shouldAutoResumeRef.current = false;
 
-    // Stop recording
+    // Stop recording if active
     if (recordingRef.current) {
-      stopRecordingInternal();
+      await stopRecordingInternal();
     }
 
     // Stop speech
@@ -614,17 +771,46 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       initialSpeechTimerRef.current = null;
     }
 
-    // ✅ NEW: Clear conversation timer
     if (conversationTimerRef.current) {
       clearInterval(conversationTimerRef.current);
       conversationTimerRef.current = null;
     }
     conversationDurationRef.current = 0;
 
-    setOrbState('idle');
-    setIsConversationActive(false);
-    setCurrentMessage(null);
-  }, [stopRecordingInternal]);
+    // ✅ NEW: Complete conversation if we have data
+    if (extractedDataRef.current.rawTranscripts && extractedDataRef.current.rawTranscripts.length > 0) {
+      // ✅ FIX: Don't build dream prompt here - let index.tsx useEffect handle it
+      // This avoids duplicate GPT calls
+
+      setIsConversationComplete(true);
+
+      // Speak quick confirmation
+      setOrbState('speaking');
+      setCurrentMessage('Got it! Let me create that for you.');
+
+      const sound = await speakText(
+        'Got it! Let me create that for you.',
+        () => {
+          stopSpeechAudioSimulation();
+          setOrbState('idle');
+          setCurrentMessage(null);
+        },
+        () => {
+          setOrbState('speaking');
+          setCurrentMessage('Got it! Let me create that for you.');
+          startSpeechAudioSimulation();
+        }
+      );
+
+      soundRef.current = sound;
+    } else {
+      // No data collected yet - just stop
+      setOrbState('idle');
+      setIsConversationActive(false);
+      isConversationActiveRef.current = false; // ✅ Sync ref
+      setCurrentMessage(null);
+    }
+  }, [stopRecordingInternal, stopSpeechAudioSimulation, startSpeechAudioSimulation, onDreamPromptReady]);
 
   // Reset conversation
   const resetConversation = useCallback(() => {
@@ -636,11 +822,13 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     setExtractedData(null);
     extractedDataRef.current = { rawTranscripts: [] }; // ✅ FIX: Reset ref too
     setTurnCount(0);
+    turnCountRef.current = 0;  // ✅ FIX: Reset turnCount ref too
     setCurrentMessage(null);
     setIsConversationComplete(false);
 
     // ✅ NEW: Ensure conversation duration is reset
     conversationDurationRef.current = 0;
+    consecutiveSilentTurnsRef.current = 0; // ✅ Reset silent turns
   }, [stopConversation]);
 
   // Admin function to reset rate limit (for testing)
@@ -659,6 +847,7 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       value={{
         orbState,
         currentMessage,
+        currentAudioLevel,  // ✅ NEW: For audio-reactive orb
         isConversationActive,
         isConversationComplete,
         extractedData,

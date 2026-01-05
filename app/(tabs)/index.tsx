@@ -9,7 +9,6 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   AppState,
   Image,
   Linking,
@@ -154,7 +153,10 @@ export default function HomeScreen() {
   const { language } = useLanguage();
   const {
     orbState,
+    currentAudioLevel,  // ✅ NEW: For audio-reactive orb
     startConversation,
+    stopConversation,
+    isConversationActive,
     isConversationComplete,
     extractedData,
     currentMessage,
@@ -273,6 +275,11 @@ export default function HomeScreen() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [completedDreamId, setCompletedDreamId] = useState<string | null>(null);
 
+  // Typing animation state
+  const [displayedText, setDisplayedText] = useState('');
+  const [isTyping, setIsTyping] = useState(true);
+  const [cursorVisible, setCursorVisible] = useState(true);
+
   // Language is now handled by LanguageContext, no need to load separately
 
   useFocusEffect(
@@ -301,6 +308,41 @@ export default function HomeScreen() {
     })();
   }, []);
 
+  // Typing animation for main prompt on mount
+  useEffect(() => {
+    const fullText = 'What did you dream?';
+    let currentIndex = 0;
+
+    setDisplayedText(''); // Start empty
+    setIsTyping(true);
+
+    const typingInterval = setInterval(() => {
+      if (currentIndex <= fullText.length) {
+        setDisplayedText(fullText.slice(0, currentIndex));
+        currentIndex++;
+      } else {
+        clearInterval(typingInterval);
+        setIsTyping(false);
+      }
+    }, 80); // 80ms per character for smooth typing
+
+    return () => clearInterval(typingInterval);
+  }, []); // Only run on mount
+
+  // Blinking cursor animation while typing
+  useEffect(() => {
+    if (!isTyping) {
+      setCursorVisible(false);
+      return;
+    }
+
+    const blinkInterval = setInterval(() => {
+      setCursorVisible(v => !v);
+    }, 530); // Blink every 530ms
+
+    return () => clearInterval(blinkInterval);
+  }, [isTyping]);
+
   // Auto-fill text box when conversation is complete
   useEffect(() => {
     if (isConversationComplete && extractedData) {
@@ -312,6 +354,22 @@ export default function HomeScreen() {
 
         setTimeout(() => {
           resetConversation();
+
+          // ✅ Reset and restart typing animation
+          setDisplayedText('');
+          setIsTyping(true);
+
+          const fullText = 'What did you dream?';
+          let currentIndex = 0;
+          const typingInterval = setInterval(() => {
+            if (currentIndex <= fullText.length) {
+              setDisplayedText(fullText.slice(0, currentIndex));
+              currentIndex++;
+            } else {
+              clearInterval(typingInterval);
+              setIsTyping(false);
+            }
+          }, 80);
         }, 1000);
       })();
     }
@@ -813,45 +871,74 @@ export default function HomeScreen() {
     <View style={{ flex: 1 }}>
       <StatusBar style="light" backgroundColor="transparent" translucent />
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
-        {/* Fixed logo at top left */}
-        <View style={styles.logoRow}>
-          <Image source={require('../../assets/images/logotrans.png')} style={styles.logoImg} />
-          <Text style={styles.logoWord}>Dream AI</Text>
+        {/* ✅ FIXED HEADER LAYER - Doesn't scroll */}
+        <View style={styles.fixedHeader} pointerEvents="box-none">
+          <View style={styles.logoRow}>
+            <Image source={require('../../assets/images/logotrans.png')} style={styles.logoImg} />
+            <Text style={styles.logoWord}>Dream AI</Text>
+          </View>
+
+          {/* DEBUG: Hidden button to reset rate limit (for testing only) */}
+          {__DEV__ && (
+            <TouchableOpacity
+              onPress={() => resetRateLimit?.()}
+              style={styles.debugButton}
+            >
+              <Text style={{ fontSize: 10, color: 'white' }}>Reset</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* DEBUG: Hidden button to reset rate limit (for testing only) */}
-        {__DEV__ && (
-          <TouchableOpacity
-            onPress={() => resetRateLimit?.()}
-            style={{
-              position: 'absolute',
-              top: 60,
-              right: 20,
-              width: 50,
-              height: 50,
-              opacity: 0.01, // Nearly invisible
-              zIndex: 100,
-            }}
-          >
-            <Text style={{ fontSize: 10, color: 'white' }}>Reset</Text>
-          </TouchableOpacity>
-        )}
-
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Text ABOVE orb - reordered */}
-          <Text style={styles.prompt}>What did you dream?</Text>
+        {/* ✅ SCROLLABLE CONTENT LAYER - Behind fixed header */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Text ABOVE orb - typing animation */}
+          <Text style={styles.prompt}>
+            {displayedText}
+            {isTyping && cursorVisible && <Text style={styles.cursor}>|</Text>}
+          </Text>
 
           {/* Orb in center */}
           <View style={styles.micContainer}>
-            <TouchableOpacity onPress={startConversation} activeOpacity={0.8}>
-              <DreamOrb state={orbState} />
+            <TouchableOpacity
+              onPress={() => {
+                if (isConversationActive && orbState === 'listening') {
+                  // User can tap to finish while listening (after giving answer)
+                  stopConversation();
+                } else if (!isConversationActive) {
+                  // Start conversation if not active
+                  startConversation();
+                }
+                // Ignore taps during speaking/thinking states
+              }}
+              activeOpacity={0.8}
+            >
+              <DreamOrb state={orbState} audioLevel={currentAudioLevel} />
             </TouchableOpacity>
             {currentMessage && (
-              <Animated.Text style={styles.orbMessage}>
-                {currentMessage}
-              </Animated.Text>
+              <Text style={styles.orbMessage}>{currentMessage}</Text>
+            )}
+            {isConversationActive && orbState === 'listening' && (
+              <Text style={styles.tapHint}>Tap orb to finish dream</Text>
             )}
           </View>
+
+          {/* 🔧 TESTING_ONLY_REMOVE_BEFORE_PRODUCTION - Visible rate limit reset button */}
+          {__DEV__ && (
+            <TouchableOpacity
+              onPress={async () => {
+                if (resetRateLimit) {
+                  await resetRateLimit();
+                  Alert.alert('✅ Testing Mode', 'Daily limit reset! You can use the orb again.');
+                }
+              }}
+              style={styles.visibleResetButton}
+            >
+              <Text style={styles.resetButtonText}>🔄 Reset Daily Limit</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.card}>
             <TextInput
@@ -1018,16 +1105,58 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { alignItems: 'center', paddingTop: 120, paddingHorizontal: 20, paddingBottom: 100 },
+
+  // ✅ FIXED HEADER - Stays at top, doesn't scroll
+  fixedHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+    zIndex: 1000,
+    // pointerEvents: 'box-none' set in JSX - allows touches to pass through to ScrollView
+  },
+
   logoRow: {
     position: 'absolute',
     top: 60,
     left: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 10,
   },
   logoImg: { width: 50, height: 50, resizeMode: 'contain', marginRight: 3 },
   logoWord: { fontSize: 28, color: '#fff', fontWeight: '500', letterSpacing: 0.5 },
+
+  debugButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    width: 50,
+    height: 50,
+    opacity: 0.01,
+  },
+
+  // 🔧 TESTING_ONLY_REMOVE_BEFORE_PRODUCTION - Visible reset button styles
+  visibleResetButton: {
+    backgroundColor: '#FF6B6B',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginVertical: 20,
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+
+  resetButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 
   micContainer: { alignItems: 'center', marginTop: 0, marginBottom: 40 },
   orbMessage: {
@@ -1039,8 +1168,20 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
     paddingHorizontal: 20,
   },
+  tapHint: {
+    fontSize: 12,
+    color: '#ffffff',
+    opacity: 0.6,
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
 
   prompt: { fontSize: 28, color: '#fff', marginBottom: 24, marginTop: 35, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
+  cursor: {
+    color: '#fff',
+    opacity: 0.7,
+  },
   card: { backgroundColor: '#fff', borderRadius: 20, width: '100%', padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, minHeight: 600 },
 
   transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100 },

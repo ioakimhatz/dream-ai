@@ -13,6 +13,7 @@ export interface TTSOptions {
 export async function speakText(
   text: string,
   onComplete?: () => void,
+  onStart?: () => void,  // ✅ NEW: Called when audio STARTS playing
   options: TTSOptions = {}
 ): Promise<Audio.Sound | null> {
   try {
@@ -84,7 +85,7 @@ export async function speakText(
                 sound.unloadAsync();
                 // Clean up temp file
                 FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(console.error);
-                // ✅ NEW: Call completion callback
+                // ✅ Call completion callback
                 if (onComplete) {
                   onComplete();
                 }
@@ -93,6 +94,12 @@ export async function speakText(
           );
 
           console.log('🔊 Playing audio...');
+
+          // ✅ NEW: Call onStart callback when audio actually starts
+          if (onStart) {
+            onStart();
+          }
+
           resolve(sound);
         } catch (error) {
           console.error('Error loading audio:', error);

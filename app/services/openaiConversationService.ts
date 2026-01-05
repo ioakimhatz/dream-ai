@@ -16,6 +16,7 @@ export interface ExtractedDreamData {
   emotions?: string;
   details?: string[];
   rawTranscripts: string[];
+  peopleNames?: string[];  // ✅ NEW: Track mentioned people's names for photo prompts
 }
 
 export interface ConversationResponse {
@@ -23,43 +24,62 @@ export interface ConversationResponse {
   extractedData: ExtractedDreamData;
   isComplete: boolean;
   shouldStop: boolean;
+  turnCount: number;  // ✅ NEW: Return incremented turn count
 }
 
-const SYSTEM_PROMPT = `You are a curious, supportive dream companion helping someone describe their dream for video generation.
+const SYSTEM_PROMPT = `You are a dream conversation guide helping someone describe their dream for video creation.
 
-Your goal is to extract:
-1. SETTING: Where did it happen? (location, environment)
-2. SUBJECT: What happened? (main event, action)
-3. EMOTIONS: How did it feel? (feelings, mood)
-4. DETAILS: Key visual details (colors, people, objects, moments)
+⚠️ CRITICAL: READ THE CONVERSATION HISTORY BEFORE ASKING QUESTIONS!
+- If the user already answered a question, DON'T ask it again
+- If they said "I was alone" or "no one", don't ask "who was with you" again
+- If they said "in Miami", don't ask "where were you" again
+- Move to NEW topics that haven't been covered yet
+- Look at what they've ALREADY told you and ask about something DIFFERENT
 
-Rules:
-- Ask ONE short, specific question per turn (max 15 words)
-- Be curious and supportive
-- Ask scaling questions that unlock new details the user hasn't mentioned
-- Don't repeat what the user already said
-- Stop after 5 questions OR when you have all 4 elements above
-- If the user says "that's all" or "I don't remember more", wrap up gracefully
+CONVERSATION STRATEGY:
+- Ask 3-4 HIGH-IMPACT questions maximum (quality over quantity)
+- SCALE intelligently - go from broad to specific, don't over-drill
+- PRIORITIZE what matters for video: WHO (people), WHAT (action), WHERE (setting), HOW (atmosphere)
+- DON'T ask repetitive questions about the same topic
+- Complete after 3-4 solid answers OR when you have enough for a compelling video
 
-When ready to finish:
-- Respond with exactly: "I have everything I need. Let me write your dream..."
-- This signals completion
+QUESTION PRIORITIES (ask in order of importance):
+1. WHO - Any people or characters? (Critical for video - faces, relationships)
+   ⚠️ IF USER MENTIONS A PERSON'S NAME → IMMEDIATELY ask: "Can you add a photo of [NAME] below so we can use their face in your dream?"
+2. WHAT - What was happening? What were you doing? (The main action/event)
+3. WHERE - What was the setting? (ONE question - accept brief answers like "park" or "beach")
+4. HOW - How did it feel? What was the atmosphere? (Emotions, mood)
+5. VISUAL DETAILS - Only ask if time permits (colors, striking objects)
 
-Example flow:
-User: "I was in a car crash"
-You: "What color was the car?"
+INTELLIGENT SCALING RULES:
+❌ BAD: "What kind of park was it?" (too specific, unnecessary)
+✅ GOOD: "Who was with you in the park?" (prioritizes people)
 
-User: "It was red"
-You: "Who was with you?"
+❌ BAD: "What color was the car?" then "What kind of car?" (over-drilling)
+✅ GOOD: Ask about car OR people, not both in detail
 
-User: "My friend Sarah"
-You: "Where were you driving?"
+❌ BAD: If they say "beach" → "What beach?" "What part of the beach?"
+✅ GOOD: If they say "beach" → Accept it, ask about people or action instead
 
-User: "On the highway"
-You: "How did it feel when it happened?"
+BE SMART ABOUT COMPLETION:
+- If user gives detailed answer with WHO + WHAT + WHERE → Complete!
+- Don't force 5 questions if you have enough
+- After 3-4 good answers, say: "I have everything I need. Let me create your dream..."
 
-User: "Scary but surreal"
-You: "I have everything I need. Let me write your dream..."`;
+CONVERSATION FLOW EXAMPLE:
+User: "I was driving a car"
+You: "Who was with you?" (prioritize people over car details)
+
+User: "My girlfriend Sarah"
+You: "Where were you driving?" (now ask location)
+
+User: "Through the mountains"
+You: "How did it feel?" (emotion/atmosphere)
+
+User: "Exciting and free"
+You: "I have everything I need. Let me create your dream..." (COMPLETE - we have WHO, WHAT, WHERE, HOW)
+
+Ask ONE concise question (max 12 words). Be natural and conversational.`;
 
 export async function processConversationTurn(
   messages: ConversationMessage[],
@@ -98,8 +118,43 @@ export async function processConversationTurn(
       updatedExtractedData.emotions = newTranscript;
     }
 
+    // ✅ NEW: Extract people/character names
+    const namePatterns = [
+      /my friend ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /my girlfriend ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /my boyfriend ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /my wife ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /my husband ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /with ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /called ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+      /named ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
+    ];
+
+    const namesFound: string[] = [];
+    const existingNames = updatedExtractedData.peopleNames || [];
+
+    for (const pattern of namePatterns) {
+      const matches = newTranscript.matchAll(pattern);
+      for (const match of matches) {
+        const name = match[1];
+        // Only add if it's a valid name and not already tracked
+        if (name && !existingNames.includes(name) && !namesFound.includes(name)) {
+          // Exclude common words that might be capitalized
+          const commonWords = ['Miami', 'Beach', 'Park', 'House', 'Car', 'Street', 'Road', 'Ocean'];
+          if (!commonWords.includes(name)) {
+            namesFound.push(name);
+          }
+        }
+      }
+    }
+
+    if (namesFound.length > 0) {
+      updatedExtractedData.peopleNames = [...existingNames, ...namesFound];
+      console.log('✅ Detected names:', namesFound);
+    }
+
     // Extract subject if first message
-    if (turnCount === 1 && !updatedExtractedData.subject) {
+    if (turnCount === 0 && !updatedExtractedData.subject) {
       updatedExtractedData.subject = newTranscript;
     }
 
@@ -109,35 +164,128 @@ export async function processConversationTurn(
                           transcript.includes("nothing else") ||
                           transcript.includes("that's it");
 
-    const hasAllElements = Boolean(
-      updatedExtractedData.setting &&
-      updatedExtractedData.subject &&
-      updatedExtractedData.emotions
+    // ✅ MUCH STRICTER: Filter out greetings and require REAL dream content
+    const hasRealDreamContent = updatedExtractedData.rawTranscripts.some(t => {
+      const transcript = t.toLowerCase().trim();
+      // Ignore greetings and test phrases
+      if (transcript === 'hey' ||
+          transcript === 'hello' ||
+          transcript === 'hi' ||
+          transcript.includes('do you hear me') ||
+          transcript.includes('can you hear me') ||
+          transcript.includes('testing')) {
+        return false;
+      }
+      // Must have actual dream keywords OR be a substantial sentence
+      return transcript.includes('dream') ||
+             transcript.includes('saw') ||
+             transcript.includes('was') ||
+             transcript.includes('were') ||
+             transcript.includes('went') ||
+             transcript.length > 20; // Or be a substantial sentence
+    });
+
+    const hasSubject = Boolean(updatedExtractedData.subject && hasRealDreamContent);
+    const hasEnoughDetail = updatedExtractedData.rawTranscripts.length >= 3; // At least 3 turns of dialogue
+    const hasLocationForCompletion = Boolean(
+      updatedExtractedData.setting ||
+      updatedExtractedData.rawTranscripts.some(t =>
+        t.toLowerCase().includes('in ') ||
+        t.toLowerCase().includes('at ') ||
+        t.toLowerCase().includes('on ') ||
+        t.toLowerCase().includes('beach') ||
+        t.toLowerCase().includes('park') ||
+        t.toLowerCase().includes('house') ||
+        t.toLowerCase().includes('car')
+      )
     );
 
-    const shouldComplete = turnCount >= 5 || hasAllElements || userWantToStop;
+    // ✅ STRICTER: Require BOTH enough detail AND enough turns
+    // Don't complete early even if we have all elements
+    const hasEnoughForVideo = hasSubject && hasEnoughDetail && hasLocationForCompletion && hasRealDreamContent;
+    const hasMinimumTurns = turnCount >= 3; // At least 3 turns minimum
 
-    // Call GPT-4o-mini for next question
+    // Only complete if:
+    // 1. We have 4+ turns, OR
+    // 2. We have all video elements AND 3+ turns, OR
+    // 3. User explicitly wants to stop
+    const shouldComplete = turnCount >= 4 || (hasEnoughForVideo && hasMinimumTurns) || userWantToStop;
+
+    console.log('🔍 DEBUG COMPLETION CHECK:');
+    console.log('  - turnCount:', turnCount);
+    console.log('  - hasRealDreamContent:', hasRealDreamContent);
+    console.log('  - hasSubject:', hasSubject);
+    console.log('  - hasEnoughDetail:', hasEnoughDetail);
+    console.log('  - hasLocationForCompletion:', hasLocationForCompletion);
+    console.log('  - hasMinimumTurns:', hasMinimumTurns);
+    console.log('  - hasEnoughForVideo:', hasEnoughForVideo);
+    console.log('  - shouldComplete:', shouldComplete);
+    console.log('  - rawTranscripts:', updatedExtractedData.rawTranscripts);
+    console.log('  - peopleNames:', updatedExtractedData.peopleNames || 'none detected');
+
+    // ✅ FIX: Build conversation summary to help AI avoid repeating questions
+    const conversationSummary = updatedExtractedData.rawTranscripts.length > 0 ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 WHAT THE USER HAS ALREADY TOLD YOU:
+${updatedExtractedData.rawTranscripts.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+✅ What we know so far:
+- Subject: ${updatedExtractedData.subject || 'not yet mentioned'}
+- Setting: ${updatedExtractedData.setting || 'not yet mentioned'}
+- Emotions: ${updatedExtractedData.emotions || 'not yet mentioned'}
+${updatedExtractedData.peopleNames && updatedExtractedData.peopleNames.length > 0
+  ? `- People mentioned: ${updatedExtractedData.peopleNames.join(', ')}`
+  : ''}
+
+${updatedExtractedData.peopleNames && updatedExtractedData.peopleNames.length > 0
+  ? `⚠️ IMPORTANT: User mentioned these people: ${updatedExtractedData.peopleNames.join(', ')}
+  → Ask if they can add photos of these people below for better video generation!
+  → Use this exact format: "Can you add a photo of [NAME] below so we can use their face in your dream?"`
+  : ''}
+
+⚠️ Ask about something NEW that hasn't been covered in the responses above!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+
+    // ✅ FIX: Add summary to system message to prevent repetitive questions
+    const messagesWithContext = [
+      { role: 'system' as const, content: SYSTEM_PROMPT + conversationSummary },
+      ...updatedMessages.slice(1)  // Skip the original system message (we replaced it)
+    ];
+
+    // ✅ UPGRADED: Use GPT-4o for smarter, more intelligent conversation
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: updatedMessages,
+      model: 'gpt-4o',  // ✅ Upgraded from gpt-4o-mini for better intelligence
+      messages: messagesWithContext,  // ✅ Use messages with context
       max_tokens: 50,
       temperature: 0.7,
     });
 
     const aiResponse = completion.choices[0]?.message?.content?.trim() || '';
 
+    console.log('🔍 DEBUG AI RESPONSE:');
+    console.log('  - aiResponse:', aiResponse);
+
     // Check if AI wants to complete
     const aiWantsToComplete = aiResponse.toLowerCase().includes('i have everything') ||
-                             aiResponse.toLowerCase().includes('let me write');
+                             aiResponse.toLowerCase().includes('let me write') ||
+                             aiResponse.toLowerCase().includes('let me create');
+
+    console.log('  - aiWantsToComplete:', aiWantsToComplete);
+    console.log('  - shouldComplete (from logic):', shouldComplete);
 
     const isComplete = shouldComplete || aiWantsToComplete;
+
+    console.log('  - FINAL isComplete:', isComplete);
+    console.log('  - Current conversation history:', updatedExtractedData.rawTranscripts);
 
     return {
       question: aiResponse,
       extractedData: updatedExtractedData,
       isComplete,
       shouldStop: isComplete,
+      turnCount: turnCount + 1,  // ✅ FIX: Return incremented turn count
     };
 
   } catch (error) {
@@ -197,7 +345,7 @@ Now synthesize this dream:`;
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',  // ✅ Also upgrade synthesis to GPT-4o for better quality
         messages: [
           {
             role: 'system',
