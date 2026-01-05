@@ -798,11 +798,15 @@ export async function generate3ClipKlingParallel(
       } else {
         console.log(`🎨 [Scene ${i + 1}] Generating ${faceUris?.length ? 'with faces' : 'from prompt'}`);
       }
-      
+
+      // ✅ CRITICAL: Use SHORT Nano Banana prompts for image generation
+      const imagePrompt = plan.nanoBananaPrompts?.[i] || plan.acts[i];
+      console.log(`📝 Image gen prompt (${imagePrompt.split(' ').length} words):`, imagePrompt);
+
       const sceneImage = await retryOperation(
         () => generateSceneImage(
           faceUris,  // ✅ Can be undefined!
-          plan.acts[i],
+          imagePrompt,  // ✅ CHANGED: Use Nano Banana prompt (SHORT)
           useBaseImage ? establishingImage : undefined
         ),
         `Scene Image ${i + 1}/3`,
@@ -835,25 +839,30 @@ export async function generate3ClipKlingParallel(
 
   // STEP 4: Animate with Kling
   onProgress?.(3, 9, "Animating...");
-  
-  const jobs = plan.acts.map((act, i) =>
-    retryOperation(
-      () => klingI2V(act, sceneImages[i]),
+
+  // ✅ CRITICAL: Use RICH Kling prompts for video generation
+  const videoPrompts = plan.klingPrompts || plan.acts;
+  console.log("🎬 Using RICH Kling prompts for video animation");
+
+  const jobs = videoPrompts.map((videoPrompt, i) => {
+    console.log(`📝 Video gen prompt (${videoPrompt.split(' ').length} words):`, videoPrompt);
+    return retryOperation(
+      () => klingI2V(videoPrompt, sceneImages[i]),  // ✅ CHANGED: Use Kling prompt (RICH)
       `Kling Video ${i + 1}/3`
     ).then((r) => {
       onProgress?.(4 + i, 9, `Video ${i + 1}/3...`);
       return r;
     }).catch((error: any) => {
       console.error(`❌ Failed to generate video ${i + 1}/3:`, error);
-      
+
       if (error.message === "CONTENT_REJECTED_BY_API") {
         console.error(`🚫 Video ${i + 1} rejected - STOPPING`);
         throw new Error("CONTENT_REJECTED_BY_KLING");
       }
-      
+
       throw new Error(`Video generation failed for scene ${i + 1}: ${error.message}`);
-    })
-  );
+    });
+  });
   
   let results;
   try {
