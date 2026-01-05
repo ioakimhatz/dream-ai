@@ -17,6 +17,7 @@ export interface ExtractedDreamData {
   details?: string[];
   rawTranscripts: string[];
   peopleNames?: string[];  // ✅ NEW: Track mentioned people's names for photo prompts
+  photoRequestsMade?: string[];  // ✅ NEW: Track who we've already asked for photos (NEVER ask again)
 }
 
 export interface ConversationResponse {
@@ -45,7 +46,28 @@ CONVERSATION STRATEGY:
 
 QUESTION PRIORITIES (ask in order of importance):
 1. WHO - Any people or characters? (Critical for video - faces, relationships)
-   ⚠️ IF USER MENTIONS A PERSON'S NAME → IMMEDIATELY ask: "Can you add a photo of [NAME] below so we can use their face in your dream?"
+
+   🎯 SMART PHOTO REQUESTS (CRITICAL - READ THIS!):
+
+   CELEBRITIES (DO NOT ask for photos - we have web search!):
+   - Musicians: Taylor Swift, Drake, Beyoncé, Ariana Grande, Bad Bunny, The Weeknd, Rihanna, Ed Sheeran, Billie Eilish, Justin Bieber, Kanye West, Dua Lipa, Post Malone
+   - Actors: Brad Pitt, Leonardo DiCaprio, Scarlett Johansson, Dwayne Johnson, Tom Cruise, Jennifer Lawrence, Chris Hemsworth, Emma Watson, Ryan Reynolds, Margot Robbie, Will Smith, Zendaya
+   - Athletes: LeBron James, Cristiano Ronaldo, Lionel Messi, Serena Williams, Tom Brady, Stephen Curry, Patrick Mahomes, Simone Biles, Tiger Woods, Neymar
+   - Tech/Business: Elon Musk, Jeff Bezos, Mark Zuckerberg, Bill Gates, Steve Jobs, Warren Buffett
+   - Politicians: Joe Biden, Donald Trump, Barack Obama, Kamala Harris
+   - Influencers/Other: Mr Beast, PewDiePie, Kim Kardashian, Oprah Winfrey, The Rock (Dwayne Johnson)
+
+   REAL PEOPLE (DO ask for photos - improves video quality!):
+   - Friends: "my friend Sarah", "John", "my buddy Mike"
+   - Family: "my girlfriend", "my boyfriend", "my mom", "my dad", "my sister"
+   - Coworkers: "my coworker", "my boss", specific names of real people
+
+   ⚠️ RULES:
+   - If celebrity → DO NOT ask for photo (web search will find them)
+   - If real person → Ask ONCE: "Can you add a photo of [NAME] below so we can use their face in your dream?"
+   - If already asked → NEVER ask again (check photoRequestsMade list in conversation summary)
+   - Be smart: "Taylor" in context = Taylor Swift (celebrity), "my friend Taylor" = real person
+
 2. WHAT - What was happening? What were you doing? (The main action/event)
 3. WHERE - What was the setting? (ONE question - accept brief answers like "park" or "beach")
 4. HOW - How did it feel? What was the atmosphere? (Emotions, mood)
@@ -134,7 +156,7 @@ export async function processConversationTurn(
     const existingNames = updatedExtractedData.peopleNames || [];
 
     for (const pattern of namePatterns) {
-      const matches = newTranscript.matchAll(pattern);
+      const matches = Array.from(newTranscript.matchAll(pattern));
       for (const match of matches) {
         const name = match[1];
         // Only add if it's a valid name and not already tracked
@@ -148,9 +170,52 @@ export async function processConversationTurn(
       }
     }
 
+    // ✅ SMART PHOTO REQUESTS: Celebrity detection
+    const CELEBRITIES = [
+      // Musicians
+      'Taylor Swift', 'Drake', 'Beyoncé', 'Ariana Grande', 'Bad Bunny', 'The Weeknd', 'Rihanna',
+      'Ed Sheeran', 'Billie Eilish', 'Justin Bieber', 'Kanye West', 'Dua Lipa', 'Post Malone',
+      // Actors
+      'Brad Pitt', 'Leonardo DiCaprio', 'Scarlett Johansson', 'Dwayne Johnson', 'Tom Cruise',
+      'Jennifer Lawrence', 'Chris Hemsworth', 'Emma Watson', 'Ryan Reynolds', 'Margot Robbie',
+      'Will Smith', 'Zendaya',
+      // Athletes
+      'LeBron James', 'Cristiano Ronaldo', 'Lionel Messi', 'Serena Williams', 'Tom Brady',
+      'Stephen Curry', 'Patrick Mahomes', 'Simone Biles', 'Tiger Woods', 'Neymar',
+      // Tech/Business
+      'Elon Musk', 'Jeff Bezos', 'Mark Zuckerberg', 'Bill Gates', 'Steve Jobs', 'Warren Buffett',
+      // Politicians
+      'Joe Biden', 'Donald Trump', 'Barack Obama', 'Kamala Harris',
+      // Influencers/Other
+      'Mr Beast', 'PewDiePie', 'Kim Kardashian', 'Oprah Winfrey', 'The Rock'
+    ];
+
+    // Check if name is a celebrity (case-insensitive, partial match)
+    const isCelebrity = (name: string): boolean => {
+      const nameLower = name.toLowerCase();
+      return CELEBRITIES.some(celeb => {
+        const celebLower = celeb.toLowerCase();
+        // Full match OR first name match for celebrities
+        return celebLower === nameLower ||
+               celebLower.includes(nameLower) ||
+               nameLower.includes(celebLower.split(' ')[0]);
+      });
+    };
+
     if (namesFound.length > 0) {
-      updatedExtractedData.peopleNames = [...existingNames, ...namesFound];
-      console.log('✅ Detected names:', namesFound);
+      // Separate celebrities from real people
+      const realPeople = namesFound.filter(name => !isCelebrity(name));
+      const celebrities = namesFound.filter(name => isCelebrity(name));
+
+      // Only add real people to peopleNames (celebrities are handled via web search)
+      if (realPeople.length > 0) {
+        updatedExtractedData.peopleNames = [...existingNames, ...realPeople];
+        console.log('✅ Detected REAL people (need photos):', realPeople);
+      }
+
+      if (celebrities.length > 0) {
+        console.log('⭐ Detected CELEBRITIES (web search will find them):', celebrities);
+      }
     }
 
     // Extract subject if first message
@@ -235,14 +300,25 @@ ${updatedExtractedData.rawTranscripts.map((t, i) => `${i + 1}. "${t}"`).join('\n
 - Setting: ${updatedExtractedData.setting || 'not yet mentioned'}
 - Emotions: ${updatedExtractedData.emotions || 'not yet mentioned'}
 ${updatedExtractedData.peopleNames && updatedExtractedData.peopleNames.length > 0
-  ? `- People mentioned: ${updatedExtractedData.peopleNames.join(', ')}`
+  ? `- Real people mentioned: ${updatedExtractedData.peopleNames.join(', ')}`
+  : ''}
+${updatedExtractedData.photoRequestsMade && updatedExtractedData.photoRequestsMade.length > 0
+  ? `- Photo requests made: ${updatedExtractedData.photoRequestsMade.join(', ')} (NEVER ask these again!)`
   : ''}
 
-${updatedExtractedData.peopleNames && updatedExtractedData.peopleNames.length > 0
-  ? `⚠️ IMPORTANT: User mentioned these people: ${updatedExtractedData.peopleNames.join(', ')}
-  → Ask if they can add photos of these people below for better video generation!
-  → Use this exact format: "Can you add a photo of [NAME] below so we can use their face in your dream?"`
-  : ''}
+${(() => {
+  // Only show photo request prompt for real people we haven't asked about yet
+  const alreadyAsked = updatedExtractedData.photoRequestsMade || [];
+  const peopleToAsk = (updatedExtractedData.peopleNames || []).filter(name => !alreadyAsked.includes(name));
+
+  if (peopleToAsk.length > 0) {
+    return `⚠️ IMPORTANT: User mentioned REAL people: ${peopleToAsk.join(', ')}
+  → These are NOT celebrities, so ask for photos!
+  → Ask ONCE per person: "Can you add a photo of [NAME] below so we can use their face in your dream?"
+  → After asking, they will be added to photoRequestsMade list`;
+  }
+  return '';
+})()}
 
 ⚠️ Ask about something NEW that hasn't been covered in the responses above!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -266,6 +342,21 @@ ${updatedExtractedData.peopleNames && updatedExtractedData.peopleNames.length > 
 
     console.log('🔍 DEBUG AI RESPONSE:');
     console.log('  - aiResponse:', aiResponse);
+
+    // ✅ TRACK PHOTO REQUESTS: Detect if AI asked for a photo and update photoRequestsMade
+    const photoRequestPattern = /photo of ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i;
+    const photoMatch = aiResponse.match(photoRequestPattern);
+
+    if (photoMatch) {
+      const requestedName = photoMatch[1];
+      const alreadyAsked = updatedExtractedData.photoRequestsMade || [];
+
+      // Only track if we haven't already asked
+      if (!alreadyAsked.includes(requestedName)) {
+        updatedExtractedData.photoRequestsMade = [...alreadyAsked, requestedName];
+        console.log(`📸 Photo request tracked for: ${requestedName}`);
+      }
+    }
 
     // Check if AI wants to complete
     const aiWantsToComplete = aiResponse.toLowerCase().includes('i have everything') ||
