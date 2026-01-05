@@ -71,13 +71,17 @@ function AppContent() {
       // Debug log to verify device detection
       console.log(`🔍 Device Detection: Constants.isDevice=${Constants.isDevice}, isSimulator=${isSimulator}`);
 
-      if (isSimulator) {
-        console.log('📱 Skipping RevenueCat initialization on simulator');
-        return;
-      }
+      // ✅ TEMPORARILY DISABLED - Constants.isDevice returns undefined on iPhone 16 Pro Max
+      // This breaks simulator detection, so we're enabling RevenueCat on ALL devices for now
+      // TODO: Re-enable after fixing Constants.isDevice setup
+      // if (isSimulator) {
+      //   console.log('📱 Skipping RevenueCat initialization on simulator');
+      //   return;
+      // }
+      console.log('💰 RevenueCat initialization enabled on ALL devices (simulator check disabled)');
 
       try {
-        console.log('💰 Initializing RevenueCat on PHYSICAL device...');
+        console.log('💰 Initializing RevenueCat...');
         if (Platform.OS === 'android') {
           await Purchases.configure({ apiKey: '***REMOVED***' });
         } else if (Platform.OS === 'ios') {
