@@ -275,7 +275,7 @@ Return JSON only:
 }
 
 async function klingI2V(prompt: string, imageUrl: string): Promise<{ localUri: string; coverUrl: string | null }> {
-  const endpoint = "https://fal.run/fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+  const endpoint = "https://fal.run/fal-ai/kling-video/v2.6/pro/image-to-video";
 
   console.log(`🎬 Generating Kling video with prompt: "${prompt}"`);
 
@@ -331,7 +331,7 @@ async function klingI2V(prompt: string, imageUrl: string): Promise<{ localUri: s
 
 // 🔥 NEW: Kling Text-to-Video for Dreamcore (no Nano Banana needed!)
 async function klingTextToVideo(prompt: string): Promise<{ localUri: string; coverUrl: string | null }> {
-  const endpoint = "https://fal.run/fal-ai/kling-video/v2.5-turbo/pro/text-to-video";
+  const endpoint = "https://fal.run/fal-ai/kling-video/v2.6/pro/text-to-video";
 
   console.log(`🎬 [Dreamcore Path] Generating Kling video from text: "${prompt}"`);
 
@@ -392,7 +392,7 @@ async function klingTextToVideo10s(prompt: string): Promise<{
   coverUrl: string | null;
   lastFrameUrl: string | null; // For consistency chaining
 }> {
-  const endpoint = "https://fal.run/fal-ai/kling-video/v2.5-turbo/pro/text-to-video";
+  const endpoint = "https://fal.run/fal-ai/kling-video/v2.6/pro/text-to-video";
 
   console.log(`🎬 [10s Dreamcore] Generating from text: "${prompt}"`);
 

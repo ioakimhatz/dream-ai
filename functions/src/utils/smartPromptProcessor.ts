@@ -69,15 +69,14 @@ export async function processPromptForGeneration(userPrompt: string): Promise<Pr
 CRITICAL RULES:
 
 1. EXTRACT CLEAN STRUCTURE:
-   ✅ KEEP: People, locations, actions, emotions, objects, time of day, creative elements
-   ❌ REMOVE: Explicit sexual content, celebrity names, pornography
-   
+   ✅ KEEP: People, locations, actions, emotions, objects, time of day, creative elements, celebrity names
+   ❌ REMOVE: Explicit sexual content, pornography
+
 2. WHAT TO REMOVE:
    - Explicit sexual acts: fucking, sex, intercourse, oral, anal, masturbation, penetration
    - Nudity: naked, nude, exposed genitals, topless, dick out, tits out
    - Pornography: porn, xxx, adult content
    - Multi-language equivalents (γαμάω, coger, baiser, etc.)
-   - Celebrity names → replace with "person", "man", "woman"
 
 3. WHAT TO KEEP:
    - People: man, woman, friend, person, girlfriend, boyfriend, multiple characters
@@ -131,8 +130,8 @@ Why: 1 main action, simple output
 ✅ COMPLEX PROMPTS (Preserve Details):
 
 Input: "I was in Agartha and it was Johnny Sins showing me crystal caves with glowing creatures"
-Output: "person exploring crystal caves in Agartha with glowing creatures"
-Why: Multiple elements (location, setting, objects), preserved all clean content, removed celebrity
+Output: "Johnny Sins exploring crystal caves in Agartha with glowing creatures"
+Why: Multiple elements (location, setting, objects), KEPT celebrity name for web search
 
 Input: "Flying over my childhood home with my best friend on a sunny afternoon feeling nostalgic"
 Output: "person flying over childhood home with friend on sunny afternoon feeling nostalgic"
@@ -143,8 +142,8 @@ Output: "person riding motorcycle through neon-lit city at night with rain and f
 Why: Multiple elements (action, setting, time, atmosphere, objects), preserved details
 
 Input: "Dancing with Taylor Swift at a party under colorful lights feeling amazing and the music was incredible"
-Output: "person dancing with woman at party under colorful lights feeling amazing"
-Why: Multiple elements, removed celebrity, kept atmosphere + emotion
+Output: "person dancing with Taylor Swift at party under colorful lights feeling amazing"
+Why: Multiple elements, KEPT celebrity name for web search, kept atmosphere + emotion
 
 Input (Greek + Complex): "Είδα ότι πετούσα πάνω από κρυστάλλινες σπηλιές με φωτεινά πλάσματα στην Αγάρθα"
 Translation: "I saw that I was flying over crystal caves with glowing creatures in Agartha"
@@ -245,13 +244,7 @@ function basicPromptCleaning(prompt: string): string {
       cleaned = cleaned.replace(new RegExp(term, 'gi'), '');
     }
   }
-  
-  // Remove celebrity names (basic)
-  const celebNames = ['johnny sins', 'kim kardashian', 'elon musk', 'taylor swift'];
-  for (const name of celebNames) {
-    cleaned = cleaned.replace(new RegExp(name, 'gi'), 'person');
-  }
-  
+
   // Clean up whitespace
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
   

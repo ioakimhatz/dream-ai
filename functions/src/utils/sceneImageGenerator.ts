@@ -62,6 +62,7 @@ export async function generateSceneImage(
           num_images: 1,
           output_format: "jpeg",
           aspect_ratio: "9:16",  // 🔥 FIXED: Force 9:16 aspect ratio!
+          enable_web_search: true,  // ✅ NEW: Find celebrity faces via web search
         }),
       });
 
@@ -103,6 +104,7 @@ export async function generateSceneImage(
         output_format: "jpeg",
         aspect_ratio: "9:16",
         negative_prompt: "cartoon, anime, drawing, painting, sketch, fantasy art, illustration, comic book, 3d render, cgi, artistic, stylized, animated, unrealistic",
+        enable_web_search: true,  // ✅ NEW: Find celebrity faces via web search
       };
 
       console.log("🔗 Total images:", body.image_urls.length);
