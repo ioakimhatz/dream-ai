@@ -25,8 +25,9 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
 
-// Check if running on simulator
-const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+// ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
+// TRUE on simulator/emulator, FALSE on physical device
+const isSimulator = !Constants.isDevice;
 
 let Notifications: any = null;
 if (!isSimulator) {

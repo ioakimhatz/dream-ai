@@ -12,8 +12,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import Purchases from 'react-native-purchases';
 
-// Check if running on simulator
-const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+// ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
+// TRUE on simulator/emulator, FALSE on physical device
+const isSimulator = !Constants.isDevice;
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
@@ -67,13 +68,16 @@ function AppContent() {
 
   useEffect(() => {
     const initializeRevenueCat = async () => {
+      // Debug log to verify device detection
+      console.log(`🔍 Device Detection: Constants.isDevice=${Constants.isDevice}, isSimulator=${isSimulator}`);
+
       if (isSimulator) {
         console.log('📱 Skipping RevenueCat initialization on simulator');
         return;
       }
 
       try {
-        console.log('💰 Initializing RevenueCat...');
+        console.log('💰 Initializing RevenueCat on PHYSICAL device...');
         if (Platform.OS === 'android') {
           await Purchases.configure({ apiKey: '***REMOVED***' });
         } else if (Platform.OS === 'ios') {

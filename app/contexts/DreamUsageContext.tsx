@@ -1,7 +1,7 @@
 // app/contexts/DreamUsageContext.tsx - DREAM BANK: Simple rollover system (dreams accumulate up to 12)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import Constants from 'expo-constants';
 import Purchases, {
   PurchasesOffering,
@@ -11,8 +11,9 @@ import { useAuth } from './AuthContext';
 import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot, increment, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { db, auth } from '../config/firebaseConfig';
 
-// Check if running on simulator
-const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+// ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
+// TRUE on simulator/emulator, FALSE on physical device
+const isSimulator = !Constants.isDevice;
 
 interface DreamUsage {
   used: number;
