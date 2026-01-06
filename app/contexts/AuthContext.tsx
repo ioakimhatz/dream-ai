@@ -324,7 +324,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               '⏰ Wake Up Time',
               "What time do you usually wake up? We'll remind you to record your dreams.",
               [
-                { text: 'Skip', style: 'cancel' },
+                {
+                  text: 'Skip',
+                  style: 'cancel',
+                  onPress: async () => {
+                    // Offer HealthKit integration when user skips manual entry
+                    setTimeout(() => {
+                      Alert.alert(
+                        '💤 Connect Health App?',
+                        'We can automatically detect your wake time from the Health app.',
+                        [
+                          { text: 'No Thanks', style: 'cancel' },
+                          {
+                            text: 'Connect',
+                            onPress: async () => {
+                              try {
+                                const { requestHealthKitPermission, getSleepSchedule } = await import('../services/healthKitService');
+                                const granted = await requestHealthKitPermission();
+
+                                if (granted) {
+                                  const schedule = await getSleepSchedule();
+                                  if (schedule && userCredential.user.uid) {
+                                    const { doc, setDoc } = await import('firebase/firestore');
+                                    const { firestore } = await import('../config/firebaseConfig');
+
+                                    // Use weekday wake time as default
+                                    await setDoc(
+                                      doc(firestore, 'users', userCredential.user.uid),
+                                      {
+                                        wakeTime: schedule.weekday.wakeup,
+                                        wakeTimeSource: 'healthkit',
+                                        sleepSchedule: schedule,
+                                      },
+                                      { merge: true }
+                                    );
+                                    console.log('✅ HealthKit sleep schedule saved');
+                                  }
+                                }
+                              } catch (error) {
+                                console.error('⚠️ HealthKit integration failed:', error);
+                              }
+                            }
+                          }
+                        ]
+                      );
+                    }, 300);
+                  }
+                },
                 {
                   text: 'Set Time',
                   onPress: async (wakeTime?: string) => {
@@ -441,7 +487,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               '⏰ Wake Up Time',
               "What time do you usually wake up? We'll remind you to record your dreams.",
               [
-                { text: 'Skip', style: 'cancel' },
+                {
+                  text: 'Skip',
+                  style: 'cancel',
+                  onPress: async () => {
+                    // Offer HealthKit integration when user skips manual entry
+                    setTimeout(() => {
+                      Alert.alert(
+                        '💤 Connect Health App?',
+                        'We can automatically detect your wake time from the Health app.',
+                        [
+                          { text: 'No Thanks', style: 'cancel' },
+                          {
+                            text: 'Connect',
+                            onPress: async () => {
+                              try {
+                                const { requestHealthKitPermission, getSleepSchedule } = await import('../services/healthKitService');
+                                const granted = await requestHealthKitPermission();
+
+                                if (granted) {
+                                  const schedule = await getSleepSchedule();
+                                  if (schedule && userCredential.user.uid) {
+                                    const { doc, setDoc } = await import('firebase/firestore');
+                                    const { firestore } = await import('../config/firebaseConfig');
+
+                                    // Use weekday wake time as default
+                                    await setDoc(
+                                      doc(firestore, 'users', userCredential.user.uid),
+                                      {
+                                        wakeTime: schedule.weekday.wakeup,
+                                        wakeTimeSource: 'healthkit',
+                                        sleepSchedule: schedule,
+                                      },
+                                      { merge: true }
+                                    );
+                                    console.log('✅ HealthKit sleep schedule saved');
+                                  }
+                                }
+                              } catch (error) {
+                                console.error('⚠️ HealthKit integration failed:', error);
+                              }
+                            }
+                          }
+                        ]
+                      );
+                    }, 300);
+                  }
+                },
                 {
                   text: 'Set Time',
                   onPress: async (wakeTime?: string) => {

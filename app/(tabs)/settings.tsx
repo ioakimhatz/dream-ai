@@ -63,6 +63,7 @@ export default function SettingsScreen() {
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [tempName, setTempName] = useState('');
   const [wakeTime, setWakeTime] = useState<string>('07:00');
+  const [wakeTimeSource, setWakeTimeSource] = useState<string>('manual');
 
   const [isPurchasing, setIsPurchasing] = useState(false);
 
@@ -93,6 +94,9 @@ export default function SettingsScreen() {
         const userData = userDoc.data();
         if (userData.wakeTime) {
           setWakeTime(userData.wakeTime);
+        }
+        if (userData.wakeTimeSource) {
+          setWakeTimeSource(userData.wakeTimeSource);
         }
       }
     } catch (error) {
@@ -200,6 +204,7 @@ export default function SettingsScreen() {
                   { merge: true }
                 );
                 setWakeTime(newWakeTime);
+                setWakeTimeSource('manual');
                 Alert.alert('✅ Saved', `Wake time set to ${newWakeTime}`);
               } catch (error) {
                 console.error('Failed to save wake time:', error);
@@ -211,6 +216,68 @@ export default function SettingsScreen() {
       ],
       'plain-text',
       wakeTime
+    );
+  };
+
+  const handleConnectHealthKit = async () => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in first.');
+      return;
+    }
+
+    try {
+      const { requestHealthKitPermission, getSleepSchedule } = await import('../services/healthKitService');
+      const granted = await requestHealthKitPermission();
+
+      if (granted) {
+        const schedule = await getSleepSchedule();
+        if (schedule) {
+          await setDoc(
+            doc(firestore, 'users', user.id),
+            {
+              wakeTime: schedule.weekday.wakeup,
+              wakeTimeSource: 'healthkit',
+              sleepSchedule: schedule,
+            },
+            { merge: true }
+          );
+          setWakeTime(schedule.weekday.wakeup);
+          setWakeTimeSource('healthkit');
+          Alert.alert('✅ Connected', `Wake time set to ${schedule.weekday.wakeup} from Health app`);
+        } else {
+          Alert.alert('No Data', 'No sleep data found in Health app. Please use manual entry.');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to connect HealthKit:', error);
+      Alert.alert('Error', 'Failed to connect to Health app. Please try again.');
+    }
+  };
+
+  const handleDisconnectHealthKit = async () => {
+    if (!user) return;
+
+    Alert.alert(
+      'Disconnect Health App?',
+      'Your wake time will switch to manual entry.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { disconnectHealthKit } = await import('../utils/healthKitSync');
+              await disconnectHealthKit(user.id);
+              setWakeTimeSource('manual');
+              Alert.alert('✅ Disconnected', 'Switched to manual wake time entry');
+            } catch (error) {
+              console.error('Failed to disconnect HealthKit:', error);
+              Alert.alert('Error', 'Failed to disconnect. Please try again.');
+            }
+          }
+        }
+      ]
     );
   };
 
@@ -648,13 +715,46 @@ export default function SettingsScreen() {
 
               {/* Wake Time Setting */}
               {notificationsEnabled && (
-                <TouchableOpacity
-                  style={[styles.row, { marginTop: 8 }]}
-                  onPress={handleWakeTimeChange}
-                >
-                  <Text style={styles.rowTitle}>Wake Up Time: {wakeTime}</Text>
-                  <Ionicons name="time-outline" size={22} color="#7278E6" />
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[styles.row, { marginTop: 8 }]}
+                    onPress={handleWakeTimeChange}
+                  >
+                    <Text style={styles.rowTitle}>Wake Up Time: {wakeTime}</Text>
+                    <Ionicons name="time-outline" size={22} color="#7278E6" />
+                  </TouchableOpacity>
+
+                  {/* Wake Time Source */}
+                  <View style={[styles.row, { marginTop: 8, opacity: 0.7 }]}>
+                    <Text style={styles.rowTitle}>
+                      Source: {wakeTimeSource === 'healthkit' ? 'Health App' : 'Manual'}
+                    </Text>
+                    {wakeTimeSource === 'healthkit' ? (
+                      <Ionicons name="fitness-outline" size={22} color="#7278E6" />
+                    ) : (
+                      <Ionicons name="create-outline" size={22} color="#7278E6" />
+                    )}
+                  </View>
+
+                  {/* Connect/Disconnect HealthKit */}
+                  {wakeTimeSource === 'manual' ? (
+                    <TouchableOpacity
+                      style={[styles.row, { marginTop: 8 }]}
+                      onPress={handleConnectHealthKit}
+                    >
+                      <Text style={styles.rowTitle}>Connect Health App</Text>
+                      <Ionicons name="add-circle-outline" size={22} color="#7278E6" />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.row, { marginTop: 8 }]}
+                      onPress={handleDisconnectHealthKit}
+                    >
+                      <Text style={[styles.rowTitle, { color: '#FF3B30' }]}>Disconnect Health App</Text>
+                      <Ionicons name="close-circle-outline" size={22} color="#FF3B30" />
+                    </TouchableOpacity>
+                  )}
+                </>
               )}
             </View>
           ) : (

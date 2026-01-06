@@ -6,7 +6,7 @@ import { doc, setDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { firestore } from '../config/firebaseConfig';
 
 // Check if running on simulator (more reliable with expo-device)
-const isSimulator = !Device.isDevice;
+const isSimulator = false;
 
 // Dynamically import expo-notifications (not available on simulator)
 let Notifications: any = null;
@@ -305,7 +305,7 @@ export async function sendVideoFailedNotification(jobId?: string): Promise<void>
 export function setupNotificationListeners() {
   if (isSimulator || !Notifications) {
     console.log('📱 Skipping notification listeners on simulator');
-    return () => {}; // Return empty cleanup function
+    return () => { }; // Return empty cleanup function
   }
 
   // Handle notification received while app is in foreground

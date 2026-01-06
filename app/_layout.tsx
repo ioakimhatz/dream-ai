@@ -21,6 +21,7 @@ import { DreamUsageProvider } from './contexts/DreamUsageContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ConversationProvider } from './contexts/ConversationContext';
 import { setupNotificationListeners } from './utils/notificationService';
+import { syncHealthKitData } from './utils/healthKitSync';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -112,6 +113,16 @@ function AppContent() {
       cleanup();
     };
   }, []);
+
+  // 💤 Sync HealthKit data on app open
+  useEffect(() => {
+    if (user?.id) {
+      console.log('💤 Syncing HealthKit data on app open...');
+      syncHealthKitData(user.id).catch(error => {
+        console.error('⚠️ HealthKit sync failed:', error);
+      });
+    }
+  }, [user?.id]);
 
   if (isLoading || checkingOnboarding) {
     console.log('⏳ SHOWING LOADING SCREEN - isLoading:', isLoading, 'checkingOnboarding:', checkingOnboarding);
