@@ -15,6 +15,13 @@ admin.initializeApp();
 // Import the dream generation function
 import { processDreamJob } from './processDreamJob';
 
+// Import notification functions
+import { sendTestNotification } from './testNotification';
+import { sendDailyDreamReminders } from './scheduledNotifications';
+
+// Export notification functions
+export { sendTestNotification, sendDailyDreamReminders };
+
 /**
  * Cloud Function triggered when a new dream job is created
  */

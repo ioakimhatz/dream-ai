@@ -20,6 +20,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ConversationProvider } from './contexts/ConversationContext';
+import { setupNotificationListeners } from './utils/notificationService';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -101,8 +102,16 @@ function AppContent() {
     initializeRevenueCat();
   }, [user]);
 
-  // 🔥 REMOVED: Notification setup is now handled in index.tsx where user is available
-  // This prevents duplicate initialization and ensures notifications are only set up when needed
+  // 🔔 Setup notification listeners
+  useEffect(() => {
+    console.log('📱 Setting up notification listeners...');
+    const cleanup = setupNotificationListeners();
+
+    return () => {
+      console.log('📱 Cleaning up notification listeners');
+      cleanup();
+    };
+  }, []);
 
   if (isLoading || checkingOnboarding) {
     console.log('⏳ SHOWING LOADING SCREEN - isLoading:', isLoading, 'checkingOnboarding:', checkingOnboarding);

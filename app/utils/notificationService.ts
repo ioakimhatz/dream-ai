@@ -1,13 +1,16 @@
-// app/utils/notificationService.ts - Expo-compatible version (no native Firebase)
+// app/utils/notificationService.ts - Expo Push Notifications ONLY
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import * as Device from 'expo-device';
+import { doc, setDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { firestore } from '../config/firebaseConfig';
 
-// Check if running on simulator
-const isSimulator = Platform.OS === 'ios' && !Constants.isDevice;
+// Check if running on simulator (more reliable with expo-device)
+const isSimulator = !Device.isDevice;
 
+// Dynamically import expo-notifications (not available on simulator)
 let Notifications: any = null;
+
 if (!isSimulator) {
   try {
     Notifications = require('expo-notifications');
@@ -22,7 +25,7 @@ if (!isSimulator) {
       }),
     });
   } catch (e) {
-    console.log('📱 Notifications not available on simulator');
+    console.log('📱 Expo Notifications not available on simulator');
   }
 } else {
   console.log('📱 Running on simulator - notifications disabled');
@@ -30,6 +33,7 @@ if (!isSimulator) {
 
 /**
  * Request push notification permissions and get Expo Push Token
+ * This is the main function to call for registering push notifications
  */
 export async function registerForPushNotifications(): Promise<string | null> {
   if (isSimulator || !Notifications) {
@@ -38,7 +42,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   try {
-    // Request permission
+    // Request permission via Expo (works on both iOS and Android)
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -53,13 +57,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
     }
 
     console.log('✅ Notification permission granted');
-
-    // Get Expo Push Token
-    const token = (await Notifications.getExpoPushTokenAsync({
-      projectId: '0fa46614-499e-4052-90a9-43f3c98b573b', // Your EAS project ID from app.json
-    })).data;
-
-    console.log('📱 Expo Push Token:', token);
 
     // Create notification channels for Android
     if (Platform.OS === 'android') {
@@ -81,7 +78,13 @@ export async function registerForPushNotifications(): Promise<string | null> {
       });
     }
 
-    return token;
+    // Get Expo Push Token
+    const expoToken = (await Notifications.getExpoPushTokenAsync({
+      projectId: '0fa46614-499e-4052-90a9-43f3c98b573b', // Your EAS project ID from app.json
+    })).data;
+    console.log('📱 Expo Push Token:', expoToken);
+    return expoToken;
+
   } catch (error) {
     console.error('Failed to register for notifications:', error);
     return null;
@@ -91,7 +94,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
 /**
  * Save Expo Push Token to Firestore
  */
-export async function saveFCMToken(userId: string, token: string): Promise<void> {
+export async function savePushToken(userId: string, token: string): Promise<void> {
   if (isSimulator || !token) {
     console.log('📱 Skipping token save on simulator');
     return;
@@ -102,9 +105,11 @@ export async function saveFCMToken(userId: string, token: string): Promise<void>
     await setDoc(
       userRef,
       {
-        pushToken: token,
+        deviceToken: token, // Expo Push Token
         pushTokenUpdatedAt: Timestamp.now(),
+        notificationsEnabled: true,
         platform: Platform.OS,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
       { merge: true }
     );
@@ -112,6 +117,62 @@ export async function saveFCMToken(userId: string, token: string): Promise<void>
   } catch (error) {
     console.error('❌ Failed to save push token:', error);
     throw error;
+  }
+}
+
+// Keep old name for backward compatibility
+export const saveFCMToken = savePushToken;
+
+/**
+ * Send a test notification to a specific device token
+ * This is a client-side helper that calls the cloud function
+ */
+export async function sendTestNotification(userId: string): Promise<boolean> {
+  if (isSimulator) {
+    console.log('📱 Cannot send test notification on simulator');
+    return false;
+  }
+
+  try {
+    // First verify the user has a device token
+    const userRef = doc(firestore, 'users', userId);
+    const userDoc = await getDoc(userRef);
+
+    if (!userDoc.exists()) {
+      console.error('❌ User document not found');
+      return false;
+    }
+
+    const userData = userDoc.data();
+    const deviceToken = userData?.deviceToken || userData?.pushToken;
+
+    if (!deviceToken) {
+      console.error('❌ No device token found for user');
+      return false;
+    }
+
+    console.log('📱 Device token found, sending local test notification...');
+
+    // Send a local notification as a test
+    if (Notifications) {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🔥 Test Notification',
+          body: 'Wake up and record your dream! This is a test notification.',
+          data: { type: 'test', timestamp: Date.now() },
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+        },
+        trigger: null, // Send immediately
+      });
+      console.log('✅ Test notification sent successfully');
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('❌ Failed to send test notification:', error);
+    return false;
   }
 }
 

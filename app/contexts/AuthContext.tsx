@@ -23,6 +23,9 @@ import {
 } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
 
+// 🔔 Notification service
+import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
+
 export interface User {
   id: string;
   email: string;
@@ -306,6 +309,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('✅ Google sign-in successful:', userCredential.user.uid);
 
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+
+      // 🔔 Register for push notifications after successful sign-in
+      try {
+        console.log('📱 Requesting notification permissions...');
+        const token = await registerForPushNotifications();
+        if (token && userCredential.user.uid) {
+          await saveFCMToken(userCredential.user.uid, token);
+          console.log('✅ Notification registration complete');
+
+          // ⏰ Ask for wake time after notification permission granted
+          setTimeout(() => {
+            Alert.prompt(
+              '⏰ Wake Up Time',
+              "What time do you usually wake up? We'll remind you to record your dreams.",
+              [
+                { text: 'Skip', style: 'cancel' },
+                {
+                  text: 'Set Time',
+                  onPress: async (wakeTime?: string) => {
+                    if (wakeTime && userCredential.user.uid) {
+                      try {
+                        const { doc, setDoc } = await import('firebase/firestore');
+                        const { firestore } = await import('../config/firebaseConfig');
+                        await setDoc(
+                          doc(firestore, 'users', userCredential.user.uid),
+                          {
+                            wakeTime: wakeTime,
+                            wakeTimeSource: 'manual',
+                          },
+                          { merge: true }
+                        );
+                        console.log('✅ Wake time saved:', wakeTime);
+                      } catch (error) {
+                        console.error('⚠️ Failed to save wake time:', error);
+                      }
+                    }
+                  }
+                }
+              ],
+              'plain-text',
+              '07:00' // Default
+            );
+          }, 500); // Small delay so notification permission dialog closes first
+        }
+      } catch (notifError) {
+        // Don't block sign-in if notification registration fails
+        console.warn('⚠️ Notification registration failed:', notifError);
+      }
+
       router.replace('/');
     } catch (e: any) {
       console.error('Google Sign-In Error:', e);
@@ -374,6 +426,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       await AsyncStorage.setItem('hasCompletedOnboarding', 'true');
+
+      // 🔔 Register for push notifications after successful sign-in
+      try {
+        console.log('📱 Requesting notification permissions...');
+        const token = await registerForPushNotifications();
+        if (token && userCredential.user.uid) {
+          await saveFCMToken(userCredential.user.uid, token);
+          console.log('✅ Notification registration complete');
+
+          // ⏰ Ask for wake time after notification permission granted
+          setTimeout(() => {
+            Alert.prompt(
+              '⏰ Wake Up Time',
+              "What time do you usually wake up? We'll remind you to record your dreams.",
+              [
+                { text: 'Skip', style: 'cancel' },
+                {
+                  text: 'Set Time',
+                  onPress: async (wakeTime?: string) => {
+                    if (wakeTime && userCredential.user.uid) {
+                      try {
+                        const { doc, setDoc } = await import('firebase/firestore');
+                        const { firestore } = await import('../config/firebaseConfig');
+                        await setDoc(
+                          doc(firestore, 'users', userCredential.user.uid),
+                          {
+                            wakeTime: wakeTime,
+                            wakeTimeSource: 'manual',
+                          },
+                          { merge: true }
+                        );
+                        console.log('✅ Wake time saved:', wakeTime);
+                      } catch (error) {
+                        console.error('⚠️ Failed to save wake time:', error);
+                      }
+                    }
+                  }
+                }
+              ],
+              'plain-text',
+              '07:00' // Default
+            );
+          }, 500); // Small delay so notification permission dialog closes first
+        }
+      } catch (notifError) {
+        // Don't block sign-in if notification registration fails
+        console.warn('⚠️ Notification registration failed:', notifError);
+      }
+
       router.replace('/');
     } catch (e: any) {
       if (e?.code === 'ERR_CANCELED' || e?.code === 'ERR_REQUEST_CANCELED') {

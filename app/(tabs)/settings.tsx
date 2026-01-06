@@ -40,12 +40,12 @@ if (!isSimulator) {
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext';
 import { SubscriptionModal } from '@/components/SubscriptionModal';
-import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
+import { registerForPushNotifications, saveFCMToken, sendTestNotification } from '../utils/notificationService';
 
 // 🔥 NEW: Import Firebase functions for account deletion
 import { deleteUser } from 'firebase/auth';
 import { auth } from '../config/firebaseConfig';
-import { getFirestore, doc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { getFirestore, doc, deleteDoc, collection, getDocs, query, where, getDoc, setDoc } from 'firebase/firestore';
 import Purchases from 'react-native-purchases';
 
 const firestore = getFirestore();
@@ -62,6 +62,7 @@ export default function SettingsScreen() {
   const [showEditNameModal, setShowEditNameModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [tempName, setTempName] = useState('');
+  const [wakeTime, setWakeTime] = useState<string>('07:00');
 
   const [isPurchasing, setIsPurchasing] = useState(false);
 
@@ -80,7 +81,24 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     loadNotificationState();
-  }, []);
+    loadWakeTime();
+  }, [user]);
+
+  const loadWakeTime = async () => {
+    if (!user) return;
+
+    try {
+      const userDoc = await getDoc(doc(firestore, 'users', user.id));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        if (userData.wakeTime) {
+          setWakeTime(userData.wakeTime);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load wake time:', error);
+    }
+  };
 
   const loadNotificationState = async () => {
     if (isSimulator || !Notifications) {
@@ -111,6 +129,90 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (user?.photo) setUserAvatar(user.photo);
   }, [user]);
+
+  const handleTestNotification = async () => {
+    if (isSimulator || !Notifications) {
+      Alert.alert('Simulator', 'Notifications are not available on iOS simulator. Please test on a real device.');
+      return;
+    }
+
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to test notifications.');
+      return;
+    }
+
+    try {
+      console.log('📱 Sending test notification...');
+      const success = await sendTestNotification(user.id);
+
+      if (success) {
+        Alert.alert(
+          '✅ Test Sent',
+          'Check your notifications! The test notification should appear shortly.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Failed to Send',
+          'Could not send test notification. Make sure notifications are enabled.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      Alert.alert(
+        'Error',
+        'Failed to send test notification. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleWakeTimeChange = () => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to set your wake time.');
+      return;
+    }
+
+    Alert.prompt(
+      '⏰ Wake Up Time',
+      'What time do you usually wake up? (Format: HH:MM)',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: async (newWakeTime?: string) => {
+            if (newWakeTime) {
+              // Validate time format
+              const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+              if (!timeRegex.test(newWakeTime)) {
+                Alert.alert('Invalid Format', 'Please use HH:MM format (e.g., 07:00)');
+                return;
+              }
+
+              try {
+                await setDoc(
+                  doc(firestore, 'users', user.id),
+                  {
+                    wakeTime: newWakeTime,
+                    wakeTimeSource: 'manual',
+                  },
+                  { merge: true }
+                );
+                setWakeTime(newWakeTime);
+                Alert.alert('✅ Saved', `Wake time set to ${newWakeTime}`);
+              } catch (error) {
+                console.error('Failed to save wake time:', error);
+                Alert.alert('Error', 'Failed to save wake time. Please try again.');
+              }
+            }
+          }
+        }
+      ],
+      'plain-text',
+      wakeTime
+    );
+  };
 
   const updateNotifications = async (value: boolean) => {
     if (isSimulator || !Notifications) {
@@ -532,6 +634,28 @@ export default function SettingsScreen() {
                   ios_backgroundColor="#E5E7EB"
                 />
               </View>
+
+              {/* Test Notification Button */}
+              {notificationsEnabled && (
+                <TouchableOpacity
+                  style={[styles.row, { marginTop: 8 }]}
+                  onPress={handleTestNotification}
+                >
+                  <Text style={styles.rowTitle}>Send Test Notification</Text>
+                  <Ionicons name="notifications-outline" size={22} color="#7278E6" />
+                </TouchableOpacity>
+              )}
+
+              {/* Wake Time Setting */}
+              {notificationsEnabled && (
+                <TouchableOpacity
+                  style={[styles.row, { marginTop: 8 }]}
+                  onPress={handleWakeTimeChange}
+                >
+                  <Text style={styles.rowTitle}>Wake Up Time: {wakeTime}</Text>
+                  <Ionicons name="time-outline" size={22} color="#7278E6" />
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             <TouchableOpacity onPress={handleSignIn} style={styles.card}>
