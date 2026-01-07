@@ -27,13 +27,17 @@
         "NSPhotoLibraryUsageDescription": "Dream AI needs access to your photo library so you can select personal photos to transform into AI-generated dream videos. For example, you can choose a photo of yourself or loved ones to appear in your personalized dream sequence.",
         "NSPhotoLibraryAddUsageDescription": "Dream AI needs permission to save your generated dream videos to your photo library so you can keep them forever and share them with friends and family.",
         "NSMicrophoneUsageDescription": "This app uses the microphone to record your dream descriptions.",
+        "NSHealthShareUsageDescription": "Dream AI needs access to your sleep schedule from the Health app to send you dream recording reminders at the perfect time when you wake up.",
+        "NSHealthUpdateUsageDescription": "Dream AI needs to update your Health data to track your dream recording habits.",
         "UIBackgroundModes": [
           "fetch",
           "remote-notification"
         ]
       },
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
       },
       "config": {
         "googleSignIn": {
@@ -101,7 +105,8 @@
             "enableShrinkResourcesInReleaseBuilds": true
           },
           "ios": {
-            "deploymentTarget": "15.1"
+            "deploymentTarget": "15.1",
+            "useFrameworks": "static"
           }
         }
       ],
@@ -125,6 +130,13 @@
           "icon": "./assets/images/logodreamai1024.png",
           "color": "#7278E6",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Dream AI needs access to your sleep schedule from the Health app to send you dream recording reminders at the perfect time when you wake up.",
+          "NSHealthUpdateUsageDescription": "Dream AI needs to update your Health data to track your dream recording habits."
         }
       ]
     ],

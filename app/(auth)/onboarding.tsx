@@ -16,6 +16,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth } from '../config/firebaseConfig';
 import { doc, setDoc, increment, serverTimestamp } from 'firebase/firestore';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as StoreReview from 'expo-store-review';
+import { Platform } from 'react-native';
+import { useSleepData } from '../hooks/useSleepData';
 
 // ---- SAFETY NET: guard all icons so missing glyphs don't crash a step ----
 const hasGlyph = (name: string) => (Ionicons as any)?.glyphMap?.[name] != null;
@@ -61,6 +65,18 @@ const QUESTIONS = [
     preview: { scenes: ['Opening scene', 'Main action', 'Epic finale'], duration: '15 seconds', quality: 'HD cinematic' }
   },
   { id: 'final', question: 'Ready to capture\nyour dream memories?', subtitle: 'Start building your complete memory library tonight' },
+  {
+    id: 'health_connection',
+    type: 'health_connection',
+    question: 'Connect to Apple Health',
+    subtitle: 'Sync your sleep schedule between Dream AI and the Health app to get reminders at the perfect time.'
+  },
+  {
+    id: 'wake_time_picker',
+    type: 'wake_time_picker',
+    question: 'When do you\nusually wake up?',
+    subtitle: "We'll send reminders at the perfect time"
+  },
   { id: 'referral', type: 'referral', question: 'Enter referral code', subtitle: '(optional)', secondarySubtitle: 'You can skip this step' }
 ];
 
@@ -70,6 +86,10 @@ export default function OnboardingScreen() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const [referralCode, setReferralCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [wakeTime, setWakeTime] = useState(new Date(new Date().setHours(7, 0, 0, 0)));
+
+  // HealthKit integration hook
+  const { authorized, wakeTime: detectedWakeTime, loading, error, requestPermissions } = useSleepData();
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   if (!fontsLoaded) return null;
@@ -132,7 +152,59 @@ export default function OnboardingScreen() {
     router.push('/auth-select');
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    // TRIGGER REAL iOS HEALTHKIT PERMISSION when user taps Continue on health screen
+    if (current.type === 'health_connection' && Platform.OS === 'ios') {
+      console.log('📱 Requesting HealthKit permissions...');
+      await requestPermissions();
+
+      // Log results
+      if (detectedWakeTime) {
+        console.log('✅ Successfully read wake time from Health:', detectedWakeTime);
+        // Auto-populate the time picker with detected wake time
+        setWakeTime(detectedWakeTime);
+      } else if (error) {
+        console.log('⚠️ HealthKit error:', error);
+      }
+
+      // Continue to manual time picker regardless of success/failure
+    }
+
+    // Save wake time and trigger App Store review when leaving wake_time_picker
+    if (current.type === 'wake_time_picker') {
+      // Save wake time to Firestore
+      if (auth.currentUser) {
+        try {
+          const hours = wakeTime.getHours();
+          const minutes = wakeTime.getMinutes();
+          const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          await setDoc(userRef, {
+            wakeTime: timeString,
+            wakeTimeSource: 'manual',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+
+          console.log('✅ Wake time saved:', timeString);
+        } catch (error) {
+          console.error('Failed to save wake time:', error);
+        }
+      }
+
+      // Trigger native App Store review popup
+      try {
+        if (await StoreReview.isAvailableAsync()) {
+          await StoreReview.requestReview();
+          console.log('📱 App Store review requested');
+        }
+      } catch (error) {
+        console.error('Failed to request review:', error);
+      }
+    }
+
+    // Continue to next screen or auth-select
     if (currentStep < QUESTIONS.length - 1) {
       Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
         const nextStep = currentStep + 1;
@@ -141,15 +213,13 @@ export default function OnboardingScreen() {
         if (nextStep === 3) {
           scaleAnim.setValue(1);
           Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-        }
-        else if (nextStep === 2) {
+        } else if (nextStep === 2) {
           scaleAnim.setValue(0.8);
           Animated.parallel([
             Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
             Animated.spring(scaleAnim, { toValue: 1, friction: 8, tension: 40, useNativeDriver: true })
           ]).start();
-        }
-        else {
+        } else {
           scaleAnim.setValue(1);
           Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
         }
@@ -198,6 +268,8 @@ export default function OnboardingScreen() {
   const isMathScreen = current.type === 'math';
   const isPhotosIconScreen = current.type === 'photos_icon';
   const isDreamIconScreen = current.type === 'dream_icon';
+  const isHealthConnectionScreen = current.type === 'health_connection';
+  const isWakeTimePickerScreen = current.type === 'wake_time_picker';
   const isReferralScreen = current.type === 'referral';
 
   return (
@@ -324,6 +396,62 @@ export default function OnboardingScreen() {
             </>
           )}
 
+          {/* HEALTH CONNECTION (EXACT Cal.ai style) */}
+          {isHealthConnectionScreen && (
+            <>
+              {/* Image from Canva - centered with proper spacing */}
+              <View style={styles.healthImageContainer}>
+                <Image
+                  source={require('../../assets/images/health.png')}
+                  style={styles.healthFlowImage}
+                  resizeMode="contain"
+                />
+              </View>
+
+              {/* Heading + Subtitle (Cal.ai style) */}
+              <View style={styles.healthTextContainer}>
+                <Text style={styles.healthHeading}>Connect to{'\n'}Apple Health</Text>
+                <Text style={styles.healthSubtitle}>
+                  Sync your sleep schedule between Dream AI and the Health app to get reminders at the perfect time.
+                </Text>
+              </View>
+            </>
+          )}
+
+          {/* WAKE TIME PICKER (iOS native) */}
+          {isWakeTimePickerScreen && (
+            <>
+              <View style={styles.questionContainer}>
+                <Text style={styles.question}>{current.question}</Text>
+                <Text style={styles.subtitle}>{current.subtitle}</Text>
+              </View>
+
+              <View style={styles.timePickerContainer}>
+                <View style={styles.timePickerWrapper}>
+                  <DateTimePicker
+                    value={wakeTime}
+                    mode="time"
+                    display="spinner"
+                    onChange={(_event, selectedTime) => {
+                      if (selectedTime) {
+                        setWakeTime(selectedTime);
+                      }
+                    }}
+                    style={styles.timePicker}
+                    textColor="#000"
+                  />
+                </View>
+
+                <View style={styles.timePickerInfo}>
+                  <SafeIonicon name="information-circle-outline" size={20} color="#7E78EA" />
+                  <Text style={styles.timePickerInfoText}>
+                    Notifications at {wakeTime.getHours()}:{wakeTime.getMinutes().toString().padStart(2, '0')} ± 10 minutes
+                  </Text>
+                </View>
+              </View>
+            </>
+          )}
+
           {/* REFERRAL */}
           {isReferralScreen && (
             <View style={styles.referralWrapper}>
@@ -368,7 +496,7 @@ export default function OnboardingScreen() {
           )}
 
           {/* REGULAR QUESTION */}
-          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && !isReferralScreen && (
+          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && !isHealthConnectionScreen && !isWakeTimePickerScreen && !isReferralScreen && (
             <View style={styles.questionContainer}>
               <Text style={styles.question}>{current.question}</Text>
               <Text style={styles.subtitle}>{current.subtitle}</Text>
@@ -487,9 +615,38 @@ export default function OnboardingScreen() {
           {!isReferralScreen && (
             <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
               <Text style={styles.continueButtonText}>
-                {isScienceScreen ? 'Got it! Continue' : isExamplesScreen ? 'I understand' : isPreviewScreen ? 'Ready to create!' : 'Continue'}
+                {isScienceScreen
+                  ? 'Got it! Continue'
+                  : isExamplesScreen
+                  ? 'I understand'
+                  : isPreviewScreen
+                  ? 'Ready to create!'
+                  : isHealthConnectionScreen
+                  ? 'Continue'
+                  : isWakeTimePickerScreen
+                  ? 'Save & Continue'
+                  : 'Continue'}
               </Text>
               <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
+            </TouchableOpacity>
+          )}
+
+          {/* SKIP BUTTON FOR HEALTH CONNECTION */}
+          {isHealthConnectionScreen && (
+            <TouchableOpacity
+              style={styles.healthSkipButton}
+              onPress={() => {
+                // Skip HealthKit and go to next screen
+                if (currentStep < QUESTIONS.length - 1) {
+                  Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+                    setCurrentStep(currentStep + 1);
+                    scaleAnim.setValue(1);
+                    Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+                  });
+                }
+              }}
+            >
+              <Text style={styles.healthSkipButtonText}>Skip</Text>
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -657,4 +814,141 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4
   },
+
+  // Sleep Connection
+  sleepConnectionContainer: {
+    alignItems: 'center',
+    marginTop: 30
+  },
+  sleepIconsRow: {
+    flexDirection: 'row',
+    gap: 24,
+    marginBottom: 32,
+    justifyContent: 'center'
+  },
+  sleepIconItem: {
+    alignItems: 'center'
+  },
+  sleepIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4
+  },
+  sleepIconLabel: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#000'
+  },
+  sleepBenefitBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F8FF',
+    padding: 20,
+    borderRadius: 16,
+    gap: 16,
+    borderWidth: 2,
+    borderColor: '#7E78EA',
+    width: '100%'
+  },
+  sleepBenefitText: {
+    flex: 1
+  },
+  sleepBenefitTitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+    color: '#000',
+    marginBottom: 4
+  },
+  sleepBenefitSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#666',
+    lineHeight: 20
+  },
+
+  // Time Picker
+  timePickerContainer: {
+    alignItems: 'center',
+    marginTop: 20,
+    width: '100%'
+  },
+  timePickerWrapper: {
+    backgroundColor: '#F8F8F8',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 24,
+    width: '100%',
+    alignItems: 'center'
+  },
+  timePicker: {
+    height: 200,
+    width: '100%'
+  },
+  timePickerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F8FF',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+    width: '100%'
+  },
+  timePickerInfoText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#666',
+    lineHeight: 20
+  },
+
+  // Health Connection (EXACT Cal.ai layout)
+  healthImageContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 40,
+    marginBottom: 32,
+    paddingHorizontal: 20
+  },
+  healthFlowImage: {
+    width: '90%',
+    height: 280,
+    maxWidth: 400
+  },
+  healthTextContainer: {
+    paddingHorizontal: 24,
+    marginBottom: 40
+  },
+  healthHeading: {
+    fontSize: 32,
+    fontFamily: 'Inter_700Bold',
+    color: '#000',
+    lineHeight: 38,
+    marginBottom: 16,
+    textAlign: 'left'
+  },
+  healthSubtitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    color: '#666',
+    lineHeight: 24,
+    textAlign: 'left'
+  },
+  healthSkipButton: {
+    marginTop: 16,
+    padding: 12
+  },
+  healthSkipButtonText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#7E78EA',
+    textAlign: 'center'
+  }
 });

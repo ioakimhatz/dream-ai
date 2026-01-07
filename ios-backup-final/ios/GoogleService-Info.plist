@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.711898710429-3vo29gs59mbgheulgki1ub8n4i0koa72</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCbTRZYuud_Q7KO6oins9nVbSoo6sW14Eg</string>
+	<key>GCM_SENDER_ID</key>
+	<string>711898710429</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.ioakimxtz.dreamai</string>
+	<key>PROJECT_ID</key>
+	<string>dream-ai-80b36</string>
+	<key>STORAGE_BUCKET</key>
+	<string>dream-ai-80b36.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:711898710429:ios:a88714ccfa19582c8baf74</string>
+</dict>
+</plist>

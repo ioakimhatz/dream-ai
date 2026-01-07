@@ -36,10 +36,8 @@ import { saveDream } from '../utils/storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import {
-  registerForPushNotifications,
   sendVideoReadyNotification,
   sendVideoFailedNotification,
-  saveFCMToken,
 } from '../utils/notificationService';
 import { syncDreamsFromFirestore } from '../services/syncService';
 
@@ -211,20 +209,8 @@ export default function HomeScreen() {
   const { user } = useAuth();
 
   useEffect(() => {
-    const setupNotifications = async () => {
-      try {
-        const token = await registerForPushNotifications();
-
-        if (token && user) {
-          await saveFCMToken(user.id, token);
-          console.log('✅ FCM token saved for user:', user.id);
-        }
-
-        console.log('✅ Notifications configured');
-      } catch (error) {
-        console.error('Failed to setup notifications:', error);
-      }
-    };
+    // Notification setup removed - now handled in onboarding
+    // Users will set wake time and grant notification permissions during onboarding flow
 
     const syncOnMount = async () => {
       try {
@@ -237,7 +223,6 @@ export default function HomeScreen() {
     };
 
     if (user) {
-      setupNotifications();
       syncOnMount();
     }
   }, [user]);

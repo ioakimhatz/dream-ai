@@ -1,9 +1,10 @@
-// app/services/healthKitService.ts
+// app/services/healthKitService.ts - Updated to use @kingstinct/react-native-healthkit
 import { Platform } from 'react-native';
-import AppleHealthKit, {
-  HealthValue,
-  HealthKitPermissions,
-} from 'react-native-health';
+import {
+  requestAuthorization,
+  queryCategorySamples,
+  CategoryValueSleepAnalysis
+} from '@kingstinct/react-native-healthkit';
 
 export interface SleepSchedule {
   weekday: {
@@ -16,16 +17,6 @@ export interface SleepSchedule {
   };
 }
 
-// HealthKit permissions we need
-const permissions: HealthKitPermissions = {
-  permissions: {
-    read: [
-      AppleHealthKit.Constants.Permissions.SleepAnalysis,
-    ],
-    write: [],
-  },
-};
-
 /**
  * Request HealthKit permission for sleep data
  */
@@ -35,17 +26,22 @@ export async function requestHealthKitPermission(): Promise<boolean> {
     return false;
   }
 
-  return new Promise((resolve) => {
-    AppleHealthKit.initHealthKit(permissions, (error: string) => {
-      if (error) {
-        console.error('❌ HealthKit permission error:', error);
-        resolve(false);
-      } else {
-        console.log('✅ HealthKit permission granted');
-        resolve(true);
-      }
+  try {
+    const status = await requestAuthorization({
+      toRead: ['HKCategoryTypeIdentifierSleepAnalysis'],
     });
-  });
+
+    if (status) {
+      console.log('✅ HealthKit permission granted');
+      return true;
+    } else {
+      console.error('❌ HealthKit permission denied');
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ HealthKit permission error:', error);
+    return false;
+  }
 }
 
 /**
@@ -64,66 +60,77 @@ export async function getSleepSchedule(): Promise<SleepSchedule | null> {
     return null;
   }
 
-  return new Promise((resolve) => {
-    const options = {
-      startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days ago
-      endDate: new Date().toISOString(),
-    };
+  try {
+    const now = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(now.getDate() - 7);
 
-    AppleHealthKit.getSleepSamples(options, (error: string, results: any[]) => {
-      if (error) {
-        console.error('❌ Error reading sleep data:', error);
-        resolve(null);
-        return;
-      }
-
-      if (!results || results.length === 0) {
-        console.log('📭 No sleep data found');
-        resolve(null);
-        return;
-      }
-
-      console.log(`📊 Found ${results.length} sleep samples`);
-
-      // Separate weekday and weekend sleep sessions
-      const weekdaySessions: Date[] = [];
-      const weekendSessions: Date[] = [];
-
-      for (const sample of results) {
-        // Filter for "InBed" or "Asleep" samples
-        if (sample.value === 'INBED' || sample.value === 'ASLEEP') {
-          const endDate = new Date(sample.endDate);
-          const dayOfWeek = endDate.getDay();
-
-          // 0 = Sunday, 6 = Saturday
-          if (dayOfWeek === 0 || dayOfWeek === 6) {
-            weekendSessions.push(endDate);
-          } else {
-            weekdaySessions.push(endDate);
+    const samples = await queryCategorySamples(
+      'HKCategoryTypeIdentifierSleepAnalysis',
+      {
+        filter: {
+          date: {
+            startDate: sevenDaysAgo,
+            endDate: now,
           }
+        },
+        ascending: false,
+        limit: 100,
+      }
+    );
+
+    if (!samples || samples.length === 0) {
+      console.log('📭 No sleep data found');
+      return null;
+    }
+
+    console.log(`📊 Found ${samples.length} sleep samples`);
+
+    // Separate weekday and weekend sleep sessions
+    const weekdaySessions: Date[] = [];
+    const weekendSessions: Date[] = [];
+
+    for (const sample of samples) {
+      // Filter for "Asleep" samples (when they wake up is the end date)
+      if (sample.value === CategoryValueSleepAnalysis.asleepUnspecified ||
+          sample.value === CategoryValueSleepAnalysis.asleepCore ||
+          sample.value === CategoryValueSleepAnalysis.asleepDeep ||
+          sample.value === CategoryValueSleepAnalysis.asleepREM ||
+          sample.value === CategoryValueSleepAnalysis.inBed) {
+        const endDate = new Date(sample.endDate);
+        const dayOfWeek = endDate.getDay();
+
+        // 0 = Sunday, 6 = Saturday
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          weekendSessions.push(endDate);
+        } else {
+          weekdaySessions.push(endDate);
         }
       }
+    }
 
-      // Calculate average wake times
-      const weekdayWakeup = calculateAverageTime(weekdaySessions);
-      const weekendWakeup = calculateAverageTime(weekendSessions);
+    // Calculate average wake times
+    const weekdayWakeup = calculateAverageTime(weekdaySessions);
+    const weekendWakeup = calculateAverageTime(weekendSessions);
 
-      // Use same time for bedtime (can be enhanced later)
-      const schedule: SleepSchedule = {
-        weekday: {
-          bedtime: '23:00',
-          wakeup: weekdayWakeup || '07:00',
-        },
-        weekend: {
-          bedtime: '00:00',
-          wakeup: weekendWakeup || '09:00',
-        },
-      };
+    // Use same time for bedtime (can be enhanced later)
+    const schedule: SleepSchedule = {
+      weekday: {
+        bedtime: '23:00',
+        wakeup: weekdayWakeup || '07:00',
+      },
+      weekend: {
+        bedtime: '00:00',
+        wakeup: weekendWakeup || '09:00',
+      },
+    };
 
-      console.log('✅ Sleep schedule detected:', schedule);
-      resolve(schedule);
-    });
-  });
+    console.log('✅ Sleep schedule detected:', schedule);
+    return schedule;
+  } catch (error) {
+    console.error('❌ Error reading sleep data:', error);
+    return null;
+  }
 }
 
 /**
