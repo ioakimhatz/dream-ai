@@ -926,15 +926,36 @@ export default function HomeScreen() {
           )}
 
           <View style={styles.card}>
-            <TextInput
-              style={styles.transcriptTextInput}
-              multiline
-              placeholder="Describe your dream..."
-              placeholderTextColor="#ccc"
-              value={transcript}
-              onChangeText={setTranscript}
-              editable
-            />
+            <View style={styles.inputWithMicContainer}>
+              <TextInput
+                style={styles.transcriptTextInput}
+                multiline
+                placeholder="Describe your dream..."
+                placeholderTextColor="#ccc"
+                value={transcript}
+                onChangeText={setTranscript}
+                editable
+              />
+
+              {/* Mic Icon - Bottom Right Corner */}
+              <TouchableOpacity
+                style={styles.miniMicIcon}
+                onPress={() => {
+                  // Use existing recording logic from DreamOrb
+                  if (isConversationActive && orbState === 'listening') {
+                    stopConversation();
+                  } else if (!isConversationActive) {
+                    startConversation();
+                  }
+                }}
+              >
+                <Ionicons
+                  name={isConversationActive ? "stop-circle" : "mic"}
+                  size={22}
+                  color={isConversationActive ? "#FF6B6B" : "#A0A0A0"}
+                />
+              </TouchableOpacity>
+            </View>
 
             <PromptStrengthIndicator
               prompt={transcript}
@@ -1089,7 +1110,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { alignItems: 'center', paddingTop: 120, paddingHorizontal: 20, paddingBottom: 100 },
+  scrollContent: { alignItems: 'center', paddingTop: 140, paddingHorizontal: 20, paddingBottom: 100 },
 
   // ✅ FIXED HEADER - Stays at top, doesn't scroll
   fixedHeader: {
@@ -1097,8 +1118,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 100,
     zIndex: 1000,
+    backgroundColor: 'transparent',
     // pointerEvents: 'box-none' set in JSX - allows touches to pass through to ScrollView
   },
 
@@ -1169,7 +1190,28 @@ const styles = StyleSheet.create({
   },
   card: { backgroundColor: '#fff', borderRadius: 20, width: '100%', padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, minHeight: 600 },
 
-  transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100 },
+  transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100, paddingRight: 56 },
+
+  inputWithMicContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  miniMicIcon: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
 
   imageSection: { marginBottom: 20 },
   imageSectionTitle: { fontSize: 18, fontWeight: Platform.OS === 'ios' ? '700' : 'bold', color: '#0A2540', marginBottom: 4 },

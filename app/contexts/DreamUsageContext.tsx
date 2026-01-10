@@ -59,27 +59,20 @@ const MAX_ROLLOVER_DREAMS = 12; // 🔥 NEW: Maximum dreams that can accumulate
 
 const PRODUCT_IDS = {
   weekly: 'dream_weekly',
-  basic: 'dream_basic_monthly',
-  pro: 'dream_pro_monthly'
+  basic: 'dream_basic_monthly'
 };
 
 const PLAN_DETAILS = {
   [PRODUCT_IDS.weekly]: {
     name: 'Weekly',
     dreams: 1,
-    price: '$3.49/week',
+    price: '$2.49/week',
     period: 'weekly' as const
   },
   [PRODUCT_IDS.basic]: {
     name: 'Basic',
     dreams: 3,
-    price: '$9.49/month',
-    period: 'monthly' as const
-  },
-  [PRODUCT_IDS.pro]: {
-    name: 'Pro',
-    dreams: 5,
-    price: '$12.49/month',
+    price: '$7.49/month',
     period: 'monthly' as const
   }
 };
@@ -420,8 +413,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
         const subscriptionRanks: Record<string, number> = {
           'dream_weekly': 1,
-          'dream_basic_monthly': 2,
-          'dream_pro_monthly': 3
+          'dream_basic_monthly': 2
         };
 
         let highestProduct = allActiveProducts[0];
@@ -821,8 +813,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
             const subscriptionRanks: Record<string, number> = {
               'dream_weekly': 1,
-              'dream_basic_monthly': 2,
-              'dream_pro_monthly': 3
+              'dream_basic_monthly': 2
             };
 
             let highestProduct = allActiveProducts[0];
@@ -883,11 +874,10 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
                 if (referralCode) {
                   // Get subscription amount based on tier
                   const subscriptionPrices: { [key: string]: number } = {
-                    'dream_weekly': 3.49,
-                    'dream_basic_monthly': 9.49,
-                    'dream_pro_monthly': 12.49
+                    'dream_weekly': 2.49,
+                    'dream_basic_monthly': 7.49
                   };
-                  const amount = subscriptionPrices[planId] || 3.49;
+                  const amount = subscriptionPrices[planId] || 2.49;
 
                   // Update referral stats
                   await setDoc(
@@ -959,8 +949,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
     const PLAN_RANKS: Record<string, number> = {
       'dream_weekly': 1,
-      'dream_basic_monthly': 2,
-      'dream_pro_monthly': 3,
+      'dream_basic_monthly': 2
     };
 
     const currentRank = PLAN_RANKS[subscription.id] || 0;

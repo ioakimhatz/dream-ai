@@ -45,26 +45,14 @@ const QUESTIONS = [
       { icon: 'time', title: 'The Golden Window', description: 'The first 90 seconds after waking are critical. Voice recording beats typing by 3x for dream recall.', stat: '3x better recall' }
     ]
   },
-  {
-    id: 'prompt_examples',
-    type: 'examples',
-    question: 'How to describe your\ndreams for best results',
-    subtitle: 'AI creates better videos from vivid descriptions',
-    examples: [
-      { quality: 'weak', icon: 'close-circle', prompt: 'I had a dream', why: 'Too vague - AI needs details' },
-      { quality: 'good', icon: 'checkmark-circle', prompt: 'I was flying over mountains at sunset', why: 'Clear scene + action + setting' },
-      { quality: 'amazing', icon: 'star', prompt: 'I was racing a red Ferrari through neon-lit Tokyo streets at midnight in the rain', why: 'Vivid details = cinematic results' }
-    ]
-  },
   { id: 'how_it_works', question: 'Voice record your dream\nthe moment you wake up', subtitle: 'AI transforms your voice into a cinematic video' },
   {
-    id: 'preview',
-    type: 'preview',
-    question: 'Your first dream will be\na 15-second cinematic video',
-    subtitle: 'AI will create 3 scenes from your description',
-    preview: { scenes: ['Opening scene', 'Main action', 'Epic finale'], duration: '15 seconds', quality: 'HD cinematic' }
+    id: 'fomo_cta',
+    type: 'fomo_cta',
+    question: 'Imagine Having Videos\nof Your Dreams',
+    subtitle: 'Now stop imagining and start recording',
+    tagline: 'Your friends will ask how you did it'
   },
-  { id: 'final', question: 'Ready to capture\nyour dream memories?', subtitle: 'Start building your complete memory library tonight' },
   {
     id: 'health_connection',
     type: 'health_connection',
@@ -77,15 +65,23 @@ const QUESTIONS = [
     question: 'When do you\nusually wake up?',
     subtitle: "We'll send reminders at the perfect time"
   },
-  { id: 'referral', type: 'referral', question: 'Enter referral code', subtitle: '(optional)', secondarySubtitle: 'You can skip this step' }
+  {
+    id: 'prompt_examples',
+    type: 'examples',
+    question: 'How to describe your\ndreams for best results',
+    subtitle: 'AI creates better videos from vivid descriptions',
+    examples: [
+      { quality: 'weak', icon: 'close-circle', prompt: 'I had a dream', why: 'Too vague - AI needs details' },
+      { quality: 'good', icon: 'checkmark-circle', prompt: 'I was flying over mountains at sunset', why: 'Clear scene + action + setting' },
+      { quality: 'amazing', icon: 'star', prompt: 'I was racing a red Ferrari through neon-lit Tokyo streets at midnight in the rain', why: 'Vivid details = cinematic results' }
+    ]
+  }
 ];
 
 export default function OnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const [referralCode, setReferralCode] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [wakeTime, setWakeTime] = useState(new Date(new Date().setHours(7, 0, 0, 0)));
 
   // HealthKit integration hook
@@ -93,64 +89,6 @@ export default function OnboardingScreen() {
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   if (!fontsLoaded) return null;
-
-  // Handle referral code submission
-  const handleReferralSubmit = async () => {
-    if (!referralCode.trim()) {
-      router.push('/auth-select');
-      return;
-    }
-
-    // Prevent double submission
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-
-    try {
-      const code = referralCode.trim().toUpperCase();
-
-      // Check if already submitted (prevent spam)
-      const alreadySubmitted = await AsyncStorage.getItem('referralSubmitted');
-      if (alreadySubmitted === 'true') {
-        console.log('⚠️ Referral already submitted, skipping');
-        router.push('/auth-select');
-        return;
-      }
-
-      // Store code in AsyncStorage
-      await AsyncStorage.setItem('referralCode', code);
-      await AsyncStorage.setItem('referralSubmitted', 'true'); // Mark as submitted
-
-      // Update Firestore referrals document
-      const referralDocRef = doc(db, 'referrals', code);
-      await setDoc(referralDocRef, {
-        code: code,
-        installs: increment(1),
-        lastInstall: serverTimestamp()
-      }, { merge: true });
-
-      // If user is authenticated, also update their user document
-      if (auth.currentUser) {
-        const userDocRef = doc(db, 'users', auth.currentUser.uid);
-        await setDoc(userDocRef, {
-          referralCode: code,
-          referredAt: serverTimestamp()
-        }, { merge: true });
-      }
-
-      console.log('✅ Referral code saved:', code);
-    } catch (error) {
-      // Log error but don't block user from continuing
-      console.error('Failed to save referral code:', error);
-    } finally {
-      setIsSubmitting(false);
-      router.push('/auth-select');
-    }
-  };
-
-  // Handle skip button
-  const handleReferralSkip = () => {
-    router.push('/auth-select');
-  };
 
   const handleContinue = async () => {
     // TRIGGER REAL iOS HEALTHKIT PERMISSION when user taps Continue on health screen
@@ -264,13 +202,12 @@ export default function OnboardingScreen() {
 
   const isScienceScreen = current.type === 'science';
   const isExamplesScreen = current.type === 'examples';
-  const isPreviewScreen = current.type === 'preview';
   const isMathScreen = current.type === 'math';
   const isPhotosIconScreen = current.type === 'photos_icon';
   const isDreamIconScreen = current.type === 'dream_icon';
+  const isFomoCTAScreen = current.type === 'fomo_cta';
   const isHealthConnectionScreen = current.type === 'health_connection';
   const isWakeTimePickerScreen = current.type === 'wake_time_picker';
-  const isReferralScreen = current.type === 'referral';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -452,51 +389,48 @@ export default function OnboardingScreen() {
             </>
           )}
 
-          {/* REFERRAL */}
-          {isReferralScreen && (
-            <View style={styles.referralWrapper}>
+          {/* FOMO CTA */}
+          {isFomoCTAScreen && (
+            <>
               <View style={styles.questionContainer}>
                 <Text style={styles.question}>{current.question}</Text>
                 <Text style={styles.subtitle}>{current.subtitle}</Text>
-                {current.secondarySubtitle && (
-                  <Text style={styles.secondarySubtitle}>{current.secondarySubtitle}</Text>
-                )}
               </View>
-              <View style={styles.referralInputContainer}>
-                {/* Input + Submit on same row */}
-                <View style={styles.inputRow}>
-                  <TextInput
-                    style={styles.referralInput}
-                    placeholder="Referral Code"
-                    placeholderTextColor="#999"
-                    value={referralCode}
-                    onChangeText={setReferralCode}
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    editable={!isSubmitting}
-                  />
-                  <TouchableOpacity
-                    style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-                    onPress={handleReferralSubmit}
-                    disabled={isSubmitting}
-                  >
-                    <Text style={styles.submitButtonText}>
-                      {isSubmitting ? 'Submitting...' : 'Submit'}
-                    </Text>
-                  </TouchableOpacity>
+
+              <View style={styles.fomoContainer}>
+                <View style={styles.fomoVideoMockup}>
+                  <View style={styles.fomoVideoInner}>
+                    <SafeIonicon name="play-circle" size={64} color="#7E78EA" />
+                    <Text style={styles.fomoVideoLabel}>Your Dream Video</Text>
+                  </View>
+                  <View style={styles.fomoShareBadge}>
+                    <SafeIonicon name="share-social" size={16} color="#FFF" />
+                    <Text style={styles.fomoShareText}>Share</Text>
+                  </View>
+                </View>
+
+                <View style={styles.fomoStatsRow}>
+                  <View style={styles.fomoStatItem}>
+                    <Text style={styles.fomoStatNumber}>50K+</Text>
+                    <Text style={styles.fomoStatLabel}>dreams recorded</Text>
+                  </View>
+                  <View style={styles.fomoStatDivider} />
+                  <View style={styles.fomoStatItem}>
+                    <Text style={styles.fomoStatNumber}>1.2M</Text>
+                    <Text style={styles.fomoStatLabel}>videos shared</Text>
+                  </View>
+                </View>
+
+                <View style={styles.fomoTaglineBox}>
+                  <SafeIonicon name="sparkles" size={20} color="#FFD93D" />
+                  <Text style={styles.fomoTagline}>{current.tagline}</Text>
                 </View>
               </View>
-              {/* Skip button at absolute bottom */}
-              <View style={styles.skipButtonContainer}>
-                <TouchableOpacity style={styles.skipButton} onPress={handleReferralSkip} disabled={isSubmitting}>
-                  <Text style={styles.skipButtonText}>Skip</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            </>
           )}
 
           {/* REGULAR QUESTION */}
-          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isPreviewScreen && !isHealthConnectionScreen && !isWakeTimePickerScreen && !isReferralScreen && (
+          {!isMathScreen && !isPhotosIconScreen && !isDreamIconScreen && !isScienceScreen && !isExamplesScreen && !isFomoCTAScreen && !isHealthConnectionScreen && !isWakeTimePickerScreen && (
             <View style={styles.questionContainer}>
               <Text style={styles.question}>{current.question}</Text>
               <Text style={styles.subtitle}>{current.subtitle}</Text>
@@ -572,64 +506,23 @@ export default function OnboardingScreen() {
             </>
           )}
 
-          {/* PREVIEW */}
-          {isPreviewScreen && (
-            <>
-              <View style={styles.questionContainer}>
-                <Text style={styles.question}>{current.question}</Text>
-                <Text style={styles.subtitle}>{current.subtitle}</Text>
-              </View>
-              <View style={styles.previewContainer}>
-                <View style={styles.videoPreview}>
-                  <SafeIonicon name="film" size={48} color="#7E78EA" />
-                  <Text style={styles.previewDuration}>{current.preview.duration}</Text>
-                  <Text style={styles.previewQuality}>{current.preview.quality}</Text>
-                </View>
-                <View style={styles.scenesContainer}>
-                  {current.preview.scenes.map((scene, index) => (
-                    <View key={index} style={styles.sceneItem}>
-                      <View style={styles.sceneNumber}><Text style={styles.sceneNumberText}>{index + 1}</Text></View>
-                      <Text style={styles.sceneText}>{scene}</Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.previewFeatures}>
-                  <View style={styles.featureItem}>
-                    <SafeIonicon name="videocam" size={20} color="#7E78EA" />
-                    <Text style={styles.featureText}>HD Quality</Text>
-                  </View>
-                  <View style={styles.featureItem}>
-                    <SafeIonicon name="musical-notes" size={20} color="#7E78EA" />
-                    <Text style={styles.featureText}>Sound Effects</Text>
-                  </View>
-                  <View style={styles.featureItem}>
-                    <SafeIonicon name="sparkles" size={20} color="#7E78EA" />
-                    <Text style={styles.featureText}>AI Enhanced</Text>
-                  </View>
-                </View>
-              </View>
-            </>
-          )}
-
           {/* CONTINUE BUTTON */}
-          {!isReferralScreen && (
-            <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-              <Text style={styles.continueButtonText}>
-                {isScienceScreen
-                  ? 'Got it! Continue'
-                  : isExamplesScreen
-                  ? 'I understand'
-                  : isPreviewScreen
-                  ? 'Ready to create!'
-                  : isHealthConnectionScreen
-                  ? 'Continue'
-                  : isWakeTimePickerScreen
-                  ? 'Save & Continue'
-                  : 'Continue'}
-              </Text>
-              <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+            <Text style={styles.continueButtonText}>
+              {isScienceScreen
+                ? 'Got it! Continue'
+                : isExamplesScreen
+                ? 'I understand'
+                : isFomoCTAScreen
+                ? 'Record Dreams'
+                : isHealthConnectionScreen
+                ? 'Continue'
+                : isWakeTimePickerScreen
+                ? 'Save & Continue'
+                : 'Continue'}
+            </Text>
+            <SafeIonicon name="arrow-forward" size={20} color="#FFF" />
+          </TouchableOpacity>
 
           {/* SKIP BUTTON FOR HEALTH CONNECTION */}
           {isHealthConnectionScreen && (
@@ -744,75 +637,97 @@ const styles = StyleSheet.create({
   continueButton: { flexDirection: 'row', backgroundColor: '#7E78EA', paddingVertical: 18, paddingHorizontal: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 20 },
   continueButtonText: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
 
-  // Referral
-  referralWrapper: {
-    flex: 1,
-    position: 'relative'
-  },
-  referralInputContainer: {
+  // FOMO CTA
+  fomoContainer: {
+    gap: 24,
     marginTop: 20
   },
-  inputRow: {
+  fomoVideoMockup: {
+    position: 'relative',
+    backgroundColor: '#F8F8FF',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#7E78EA',
+    shadowColor: '#7E78EA',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8
+  },
+  fomoVideoInner: {
+    alignItems: 'center',
+    gap: 12
+  },
+  fomoVideoLabel: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#7E78EA'
+  },
+  fomoShareBadge: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    backgroundColor: '#7E78EA',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6
+  },
+  fomoShareText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFF'
+  },
+  fomoStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8F8F8',
+    paddingVertical: 20,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    gap: 24
+  },
+  fomoStatItem: {
     alignItems: 'center'
   },
-  referralInput: {
-    flex: 1,
-    backgroundColor: '#F8F8F8',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
+  fomoStatNumber: {
+    fontSize: 28,
+    fontFamily: 'Inter_700Bold',
+    color: '#7E78EA'
+  },
+  fomoStatLabel: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#666',
+    marginTop: 4
+  },
+  fomoStatDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#DDD'
+  },
+  fomoTaglineBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFEF0',
     paddingVertical: 16,
-    paddingHorizontal: 20,
-    fontSize: 16,
-    fontFamily: 'Inter_500Medium',
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#FFD93D'
+  },
+  fomoTagline: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
     color: '#000',
     textAlign: 'center'
-  },
-  submitButton: {
-    backgroundColor: '#7E78EA',
-    paddingVertical: 16,
-    paddingHorizontal: 28,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  submitButtonDisabled: {
-    opacity: 0.5
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#FFF'
-  },
-  skipButtonContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 0
-  },
-  skipButton: {
-    backgroundColor: '#7E78EA',
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  skipButtonText: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#FFF'
-  },
-  secondarySubtitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    color: '#999',
-    lineHeight: 20,
-    textAlign: 'center',
-    marginTop: 4
   },
 
   // Sleep Connection
