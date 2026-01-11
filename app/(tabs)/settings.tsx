@@ -75,9 +75,8 @@ export default function SettingsScreen() {
     isLoadingSubscription,
     purchaseSubscription,
     restorePurchases,
-    refreshSubscriptionStatus,
     upgradeOrDowngradePlan,
-    getUpgradeDowngradeInfo,
+    purchaseCustomDreams,
   } = useDreamUsage();
 
   useEffect(() => {
@@ -539,16 +538,36 @@ export default function SettingsScreen() {
 
   const handleSignIn = () => router.push('/(auth)/signin');
 
-  const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
+  const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'custom', quantity?: number) => {
     if (isPurchasing) {
       console.log('⚠️ Purchase already in progress, ignoring tap');
+      return;
+    }
+
+    // Handle custom plan purchase
+    if (planType === 'custom' && quantity) {
+      console.log('💳 Purchasing custom dreams from settings:', quantity);
+
+      setIsPurchasing(true);
+
+      try {
+        const success = await purchaseCustomDreams(quantity);
+
+        if (success) {
+          setShowSubscriptionModal(false);
+        }
+      } catch (error) {
+        console.error('❌ Purchase error in settings:', error);
+      } finally {
+        setIsPurchasing(false);
+      }
+
       return;
     }
 
     const productMap: Record<string, string> = {
       weekly: 'dream_weekly',
       basic: 'dream_basic_monthly',
-      pro: 'dream_pro_monthly'
     };
 
     const productId = productMap[planType];

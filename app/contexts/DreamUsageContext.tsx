@@ -51,6 +51,7 @@ interface DreamUsageContextType {
   refreshSubscriptionStatus: () => Promise<void>;
   upgradeOrDowngradePlan: (newPackage: PurchasesPackage) => Promise<boolean>;
   getUpgradeDowngradeInfo: (newPlanId: string) => UpgradeDowngradeInfo | null;
+  purchaseCustomDreams: (quantity: number) => Promise<boolean>;
 }
 
 const DREAM_USAGE_KEY = '@dream_usage';
@@ -59,7 +60,8 @@ const MAX_ROLLOVER_DREAMS = 12; // 🔥 NEW: Maximum dreams that can accumulate
 
 const PRODUCT_IDS = {
   weekly: 'dream_weekly',
-  basic: 'dream_basic_monthly'
+  basic: 'dream_basic_monthly',
+  consumable: 'dream_credits_consumable',
 };
 
 const PLAN_DETAILS = {
@@ -944,6 +946,101 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  const purchaseCustomDreams = async (quantity: number): Promise<boolean> => {
+    if (!auth.currentUser) {
+      Alert.alert('Error', 'Please sign in to purchase dreams');
+      return false;
+    }
+
+    try {
+      console.log('🛒 Starting custom purchase for', quantity, 'dreams');
+      console.log('📦 Product ID:', PRODUCT_IDS.consumable);
+
+      // STEP 1: Get offerings
+      const offerings = await Purchases.getOfferings();
+      console.log('📋 Available offerings:', Object.keys(offerings.all));
+
+      // STEP 2: Try to find consumable in offerings
+      let consumablePackage = null;
+
+      // Check current offering
+      if (offerings.current) {
+        consumablePackage = offerings.current.availablePackages.find(
+          pkg => pkg.product.identifier === PRODUCT_IDS.consumable
+        );
+        console.log('🔍 Found in current offering:', !!consumablePackage);
+      }
+
+      // Check all offerings if not found
+      if (!consumablePackage) {
+        for (const offering of Object.values(offerings.all)) {
+          consumablePackage = offering.availablePackages.find(
+            pkg => pkg.product.identifier === PRODUCT_IDS.consumable
+          );
+          if (consumablePackage) {
+            console.log('🔍 Found in offering:', offering.identifier);
+            break;
+          }
+        }
+      }
+
+      // STEP 3: Purchase
+      let customerInfo;
+
+      if (consumablePackage) {
+        console.log('✅ Using package purchase');
+        const result = await Purchases.purchasePackage(consumablePackage);
+        customerInfo = result.customerInfo;
+      } else {
+        console.log('⚠️ Package not found, trying direct purchase');
+        const result = await Purchases.purchaseStoreProduct(PRODUCT_IDS.consumable);
+        customerInfo = result.customerInfo;
+      }
+
+      console.log('✅ Purchase completed via RevenueCat');
+      console.log('📊 Active entitlements:', Object.keys(customerInfo.entitlements.active));
+
+      // Add credits to Firestore
+      const userDocRef = doc(db, 'users', auth.currentUser.uid);
+      await setDoc(userDocRef, {
+        dreamCredits: increment(quantity),
+        lastPurchase: serverTimestamp(),
+      }, { merge: true });
+
+      console.log(`✅ Added ${quantity} credits to Firestore`);
+
+      // Verify
+      const updatedDoc = await getDoc(userDocRef);
+      const newBalance = updatedDoc.data()?.dreamCredits || 0;
+      console.log('💰 New credit balance:', newBalance);
+
+      Alert.alert(
+        'Purchase Successful! 🎉',
+        `${quantity} dream credits added.\nYou now have ${newBalance} credits.`,
+        [{ text: 'OK' }]
+      );
+
+      return true;
+    } catch (error: any) {
+      console.error('❌ FULL ERROR:', JSON.stringify(error, null, 2));
+      console.error('❌ Error message:', error.message);
+      console.error('❌ Error code:', error.code);
+      console.error('❌ Error userInfo:', error.userInfo);
+
+      if (error.userCancelled) {
+        console.log('ℹ️ User cancelled purchase');
+        return false;
+      }
+
+      Alert.alert(
+        'Purchase Failed',
+        `Error: ${error.message || 'Unknown error'}\n\nProduct may still be pending review.`,
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+  };
+
   const getUpgradeDowngradeInfo = useCallback((newPlanId: string): UpgradeDowngradeInfo | null => {
     if (!subscription) return null;
 
@@ -1162,6 +1259,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         refreshSubscriptionStatus,
         upgradeOrDowngradePlan,
         getUpgradeDowngradeInfo,
+        purchaseCustomDreams,
       }}
     >
       {children}

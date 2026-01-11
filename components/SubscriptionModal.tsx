@@ -1,5 +1,5 @@
 // components/SubscriptionModal.tsx - UPDATED TO PREVENT MULTIPLE TAPS
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -16,7 +16,7 @@ interface SubscriptionModalProps {
   visible: boolean;
   onClose: () => void;
   onRestore: () => void;
-  onSelectPlan: (plan: 'weekly' | 'basic' | 'pro') => void;
+  onSelectPlan: (plan: 'weekly' | 'basic' | 'custom', quantity?: number) => void;
   currentId?: string;
   isPurchasing?: boolean; // ✅ New prop to disable buttons during purchase
 }
@@ -30,6 +30,7 @@ export function SubscriptionModal({
   isPurchasing = false, // ✅ Default to false
 }: SubscriptionModalProps) {
   const router = useRouter();
+  const [customDreamCount, setCustomDreamCount] = useState(2);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -64,7 +65,7 @@ export function SubscriptionModal({
                   <ActivityIndicator size="small" color="#7278E6" style={{ marginLeft: 8 }} />
                 )}
               </View>
-              <Text style={styles.planPrice}>$3.49/week</Text>
+              <Text style={styles.planPrice}>$2.49/week</Text>
               <View style={styles.planFeatures}>
                 <Text style={styles.planFeature}>• 1 dream per week</Text>
                 <Text style={styles.planFeature}>• HD quality videos</Text>
@@ -75,13 +76,17 @@ export function SubscriptionModal({
             {/* BASIC MONTHLY */}
             <TouchableOpacity
               style={[
-                styles.planCard, 
+                styles.planCard,
+                styles.recommendedPlan,
                 currentId === 'dream_basic_monthly' && styles.currentPlan,
                 isPurchasing && styles.disabledPlan // ✅ Visual feedback when disabled
               ]}
               onPress={() => onSelectPlan('basic')}
               disabled={currentId === 'dream_basic_monthly' || isPurchasing} // ✅ Disable during purchase
             >
+              <View style={styles.savingsBadge}>
+                <Text style={styles.savingsText}>BEST VALUE</Text>
+              </View>
               <View style={styles.planHeader}>
                 <Text style={styles.planName}>Basic Monthly</Text>
                 {currentId === 'dream_basic_monthly' && (
@@ -93,7 +98,7 @@ export function SubscriptionModal({
                   <ActivityIndicator size="small" color="#7278E6" style={{ marginLeft: 8 }} />
                 )}
               </View>
-              <Text style={styles.planPrice}>$9.49/month</Text>
+              <Text style={styles.planPrice}>$7.49/month</Text>
               <View style={styles.planFeatures}>
                 <Text style={styles.planFeature}>• 3 dreams per month</Text>
                 <Text style={styles.planFeature}>• HD quality videos</Text>
@@ -101,40 +106,50 @@ export function SubscriptionModal({
               </View>
             </TouchableOpacity>
 
-            {/* PRO MONTHLY - BEST VALUE */}
-            <TouchableOpacity
-              style={[
-                styles.planCard, 
-                styles.recommendedPlan, 
-                currentId === 'dream_pro_monthly' && styles.currentPlan,
-                isPurchasing && styles.disabledPlan // ✅ Visual feedback when disabled
-              ]}
-              onPress={() => onSelectPlan('pro')}
-              disabled={currentId === 'dream_pro_monthly' || isPurchasing} // ✅ Disable during purchase
-            >
-              <View style={styles.savingsBadge}>
-                <Text style={styles.savingsText}>BEST VALUE</Text>
-              </View>
+            {/* CUSTOM DREAM PURCHASE */}
+            <View style={styles.planCard}>
               <View style={styles.planHeader}>
-                <Text style={styles.planName}>Pro Monthly</Text>
-                {currentId === 'dream_pro_monthly' && (
-                  <View style={styles.currentBadge}>
-                    <Text style={styles.currentBadgeText}>CURRENT</Text>
-                  </View>
-                )}
-                {isPurchasing && (
-                  <ActivityIndicator size="small" color="#7278E6" style={{ marginLeft: 8 }} />
-                )}
+                <Text style={styles.planName}>Custom</Text>
               </View>
-              <Text style={styles.planPrice}>$12.49/month</Text>
-              <Text style={styles.planSubtext}>Just $2.50 per dream</Text>
-              <View style={styles.planFeatures}>
-                <Text style={styles.planFeature}>• 5 dreams per month</Text>
-                <Text style={styles.planFeature}>• HD quality videos</Text>
-                <Text style={styles.planFeature}>• Priority support</Text>
-                <Text style={styles.planFeature}>• Early access to features</Text>
+              <Text style={styles.planSubtext}>Buy exactly what you need</Text>
+
+              {/* Dream Counter with +/- buttons */}
+              <View style={styles.dreamCounter}>
+                <TouchableOpacity
+                  style={styles.counterButton}
+                  onPress={() => setCustomDreamCount(Math.max(2, customDreamCount - 1))}
+                  disabled={customDreamCount <= 2}
+                >
+                  <Text style={styles.counterButtonText}>−</Text>
+                </TouchableOpacity>
+
+                <View style={styles.counterDisplay}>
+                  <Text style={styles.counterNumber}>{customDreamCount}</Text>
+                  <Text style={styles.counterLabel}>dreams</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.counterButton}
+                  onPress={() => setCustomDreamCount(customDreamCount + 1)}
+                >
+                  <Text style={styles.counterButtonText}>+</Text>
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+
+              {/* Dynamic Price Display */}
+              <Text style={styles.planPrice}>${(customDreamCount * 2.49).toFixed(2)}</Text>
+              <Text style={styles.planSubtext}>$2.49 per dream</Text>
+
+              <TouchableOpacity
+                style={styles.purchaseButton}
+                onPress={() => onSelectPlan('custom', customDreamCount)}
+                disabled={isPurchasing}
+              >
+                <Text style={styles.purchaseButtonText}>
+                  {isPurchasing ? 'Processing...' : 'Purchase Dreams'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {/* ✅ Show processing message when purchase is in progress */}
             {isPurchasing && (
@@ -240,4 +255,56 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   legalText: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginHorizontal: 20, marginBottom: 20 },
+  customPlan: {
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    backgroundColor: '#FFFEF0',
+  },
+  dreamCounter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 16,
+    gap: 20,
+  },
+  counterButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#7E78EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterButtonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  counterDisplay: {
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  counterNumber: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#0A2540',
+  },
+  counterLabel: {
+    fontSize: 14,
+    color: '#68707D',
+    marginTop: 4,
+  },
+  purchaseButton: {
+    backgroundColor: '#7E78EA',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  purchaseButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
 });

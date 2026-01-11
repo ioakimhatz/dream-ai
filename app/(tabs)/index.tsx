@@ -33,7 +33,7 @@ import { buildDreamPrompt } from '../services/openaiConversationService';
 import { removeBackground } from '../utils/backgroundRemoval';
 import { analyzePromptStrength } from '../utils/promptValidator';
 import { saveDream } from '../utils/storage';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, increment } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import {
   sendVideoReadyNotification,
@@ -233,6 +233,7 @@ export default function HomeScreen() {
     offerings,
     purchaseSubscription,
     restorePurchases,
+    purchaseCustomDreams,
   } = useDreamUsage();
 
   const [showPaywall, setShowPaywall] = useState(false);
@@ -264,6 +265,10 @@ export default function HomeScreen() {
   const [displayedText, setDisplayedText] = useState('');
   const [isTyping, setIsTyping] = useState(true);
   const [cursorVisible, setCursorVisible] = useState(true);
+
+  // Simple transcription recording (for mic button in text input)
+  const [isSimpleRecording, setIsSimpleRecording] = useState(false);
+  const simpleRecordingRef = useRef<Audio.Recording | null>(null);
 
   // Language is now handled by LanguageContext, no need to load separately
 
@@ -359,6 +364,73 @@ export default function HomeScreen() {
       })();
     }
   }, [isConversationComplete, extractedData, resetConversation]);
+
+  // Simple recording functions for inline mic button
+  const startSimpleRecording = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      simpleRecordingRef.current = recording;
+      setIsSimpleRecording(true);
+      console.log('🎤 Simple recording started');
+    } catch (error) {
+      console.error('Failed to start simple recording:', error);
+      Alert.alert('Recording Error', 'Failed to start recording. Please try again.');
+    }
+  };
+
+  const stopSimpleRecording = async (): Promise<string | null> => {
+    try {
+      if (!simpleRecordingRef.current) return null;
+
+      setIsSimpleRecording(false);
+      await simpleRecordingRef.current.stopAndUnloadAsync();
+      const uri = simpleRecordingRef.current.getURI();
+      simpleRecordingRef.current = null;
+
+      if (!uri) return null;
+
+      console.log('🎤 Recording saved to:', uri);
+
+      // Transcribe with OpenAI Whisper
+      const formData = new FormData();
+      formData.append('file', {
+        uri: uri,
+        type: 'audio/m4a',
+        name: 'recording.m4a',
+      } as any);
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'en');
+
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Transcription failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Transcribed text:', data.text);
+
+      return data.text || null;
+    } catch (error) {
+      console.error('Failed to transcribe recording:', error);
+      Alert.alert('Transcription Error', 'Failed to transcribe audio. Please try again.');
+      return null;
+    }
+  };
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async (nextAppState) => {
@@ -690,32 +762,56 @@ export default function HomeScreen() {
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    if (!subscription) {
-      setIsGenerating(true);
-      setGenerationProgress(0);
-      setGenerationStep('Analyzing your dream…');
-      const iv = setInterval(() => setGenerationProgress(prev => Math.min(prev + 25, 100)), 1000);
-      setTimeout(() => setGenerationStep('Creating scenes…'), 1000);
-      setTimeout(() => setGenerationStep('Almost ready…'), 2500);
-      setTimeout(() => {
-        clearInterval(iv);
-        setIsGenerating(false);
-        setGenerationProgress(0);
-        setGenerationStep('');
-        setShowBlurredPreview(true);
-      }, 4000);
+    // Check authentication first
+    if (!user) {
+      Alert.alert('Error', 'Please sign in to generate dreams');
       return;
     }
 
-    // 🔥 NEW: Check if user has dreams available (read from Firestore - server is source of truth)
-    // NOTE: We don't deduct here anymore - Cloud Function will handle deduction
     try {
-      if (!user) {
-        Alert.alert('Error', 'Please sign in to generate dreams');
+      // 🔥 STEP 1: Check dream credits FIRST
+      console.log('🔍 Checking dream credits...');
+      const userDoc = await getDoc(doc(db, 'users', user.id));
+      const dreamCredits = userDoc.data()?.dreamCredits || 0;
+
+      if (dreamCredits > 0) {
+        // User has credits - deduct one and proceed
+        await setDoc(doc(db, 'users', user.id), {
+          dreamCredits: increment(-1),
+        }, { merge: true });
+
+        console.log(`✅ Used 1 dream credit, remaining: ${dreamCredits - 1}`);
+        console.log('✅ Proceeding with generation using credit...');
+
+        // Proceed with generation
+        await proceedWithGeneration();
         return;
       }
 
-      console.log('🔍 Checking dream availability from Firestore...');
+      console.log('💳 No credits available, checking subscription...');
+
+      // 🔥 STEP 2: Check subscription if no credits
+      if (!subscription) {
+        // No credits AND no subscription - show paywall preview
+        console.log('⚠️ No subscription found - showing paywall preview');
+        setIsGenerating(true);
+        setGenerationProgress(0);
+        setGenerationStep('Analyzing your dream…');
+        const iv = setInterval(() => setGenerationProgress(prev => Math.min(prev + 25, 100)), 1000);
+        setTimeout(() => setGenerationStep('Creating scenes…'), 1000);
+        setTimeout(() => setGenerationStep('Almost ready…'), 2500);
+        setTimeout(() => {
+          clearInterval(iv);
+          setIsGenerating(false);
+          setGenerationProgress(0);
+          setGenerationStep('');
+          setShowBlurredPreview(true);
+        }, 4000);
+        return;
+      }
+
+      // 🔥 STEP 3: Check subscription dream availability
+      console.log('🔍 Checking subscription dream availability from Firestore...');
       const usageRef = doc(db, 'dreamUsage', user.id);
       const usageSnap = await getDoc(usageRef);
 
@@ -728,18 +824,18 @@ export default function HomeScreen() {
       const used = usageData.used || 0;
       const total = usageData.total || 0;
 
-      console.log(`📊 Dream availability check: ${used}/${total}`);
+      console.log(`📊 Subscription dream availability: ${used}/${total}`);
 
       if (used >= total) {
         Alert.alert(
           'Dream Limit Reached',
-          `You've used all ${total} dreams for this period. Next reset: ${new Date(usageData.resetDate?.toDate?.() || usageData.resetDate).toLocaleDateString()}`,
+          `You've used all ${total} dreams for this period. Next reset: ${new Date(usageData.resetDate?.toDate?.() || usageData.resetDate).toLocaleDateString()}\n\nTip: Purchase additional dreams to continue creating!`,
           [{ text: 'OK', style: 'cancel' }]
         );
         return;
       }
 
-      console.log('✅ User has dreams available - proceeding to generation');
+      console.log('✅ Subscription has dreams available - proceeding to generation');
       console.log('ℹ️ Server will deduct dream when job starts');
 
       // Proceed with generation - Cloud Function will deduct the dream
@@ -751,41 +847,71 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'pro') => {
+  const handleSelectPlan = async (planType: 'weekly' | 'basic' | 'custom', quantity?: number) => {
     if (isPurchasing) {
       console.log('⚠️ Purchase already in progress, ignoring tap');
       return;
     }
 
-    const productMap: Record<string, string> = {
-      weekly: 'dream_weekly',
-      basic: 'dream_basic_monthly',
-      pro: 'dream_pro_monthly'
-    };
-
-    const productId = productMap[planType];
-
-    if (!offerings?.availablePackages) {
-      Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
-      return;
-    }
-
-    console.log('💳 Looking for product ID:', productId);
-
-    const packageToPurchase = offerings.availablePackages.find(
-      (p) => p.product.identifier === productId
-    );
-
-    if (!packageToPurchase) {
-      Alert.alert('Error', 'Selected plan is not available. Please try again.');
-      return;
-    }
-
-    console.log('✅ Found package:', packageToPurchase.identifier);
-
     setIsPurchasing(true);
 
     try {
+      // Handle custom dream purchase
+      if (planType === 'custom' && quantity) {
+        console.log('💳 Purchasing custom dreams:', quantity);
+        const success = await purchaseCustomDreams(quantity);
+
+        if (success) {
+          setShowPaywall(false);
+          setShowBlurredPreview(false);
+
+          // Proceed with dream generation
+          try {
+            console.log('✅ Custom purchase successful - proceeding with generation');
+            await proceedWithGeneration();
+
+            setTimeout(() => {
+              Alert.alert(
+                '🎉 Success!',
+                'Generating your dream cinema...',
+                [{ text: 'Great!', style: 'default' }]
+              );
+            }, 500);
+
+          } catch (error) {
+            console.error('❌ Error after custom purchase:', error);
+            Alert.alert('Error', 'Purchase successful! Please tap Generate again to create your dream.');
+          }
+        }
+        return;
+      }
+
+      // Handle subscription purchase
+      const productMap: Record<string, string> = {
+        weekly: 'dream_weekly',
+        basic: 'dream_basic_monthly',
+      };
+
+      const productId = productMap[planType];
+
+      if (!offerings?.availablePackages) {
+        Alert.alert('Error', 'Subscription plans are not available. Please try again later.');
+        return;
+      }
+
+      console.log('💳 Looking for product ID:', productId);
+
+      const packageToPurchase = offerings.availablePackages.find(
+        (p) => p.product.identifier === productId
+      );
+
+      if (!packageToPurchase) {
+        Alert.alert('Error', 'Selected plan is not available. Please try again.');
+        return;
+      }
+
+      console.log('✅ Found package:', packageToPurchase.identifier);
+
       const success = await purchaseSubscription(packageToPurchase);
 
       if (success) {
@@ -855,30 +981,20 @@ export default function HomeScreen() {
   return (
     <View style={{ flex: 1 }}>
       <StatusBar style="light" backgroundColor="transparent" translucent />
+
+      {/* Background gradient layer */}
       <LinearGradient colors={['#7C86FF', '#E3C8FF']} style={styles.container}>
-        {/* ✅ FIXED HEADER LAYER - Doesn't scroll */}
-        <View style={styles.fixedHeader} pointerEvents="box-none">
+        {/* ✅ SCROLLABLE CONTENT LAYER */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Logo at top of scrollable content */}
           <View style={styles.logoRow}>
             <Image source={require('../../assets/images/logotrans.png')} style={styles.logoImg} />
             <Text style={styles.logoWord}>Dream AI</Text>
           </View>
 
-          {/* DEBUG: Hidden button to reset rate limit (for testing only) */}
-          {__DEV__ && (
-            <TouchableOpacity
-              onPress={() => resetRateLimit?.()}
-              style={styles.debugButton}
-            >
-              <Text style={{ fontSize: 10, color: 'white' }}>Reset</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* ✅ SCROLLABLE CONTENT LAYER - Behind fixed header */}
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
           {/* Text ABOVE orb - typing animation */}
           <Text style={styles.prompt}>
             {displayedText}
@@ -910,49 +1026,40 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* 🔧 TESTING_ONLY_REMOVE_BEFORE_PRODUCTION - Visible rate limit reset button */}
-          {__DEV__ && (
-            <TouchableOpacity
-              onPress={async () => {
-                if (resetRateLimit) {
-                  await resetRateLimit();
-                  Alert.alert('✅ Testing Mode', 'Daily limit reset! You can use the orb again.');
-                }
-              }}
-              style={styles.visibleResetButton}
-            >
-              <Text style={styles.resetButtonText}>🔄 Reset Daily Limit</Text>
-            </TouchableOpacity>
-          )}
-
           <View style={styles.card}>
-            <View style={styles.inputWithMicContainer}>
+            {/* TextInput with inline mic button */}
+            <View style={styles.inputWithInlineMic}>
               <TextInput
                 style={styles.transcriptTextInput}
                 multiline
                 placeholder="Describe your dream..."
-                placeholderTextColor="#ccc"
+                placeholderTextColor="#999"
                 value={transcript}
                 onChangeText={setTranscript}
                 editable
               />
 
-              {/* Mic Icon - Bottom Right Corner */}
+              {/* Mic Icon - Positioned absolutely in top-right */}
               <TouchableOpacity
-                style={styles.miniMicIcon}
-                onPress={() => {
-                  // Use existing recording logic from DreamOrb
-                  if (isConversationActive && orbState === 'listening') {
-                    stopConversation();
-                  } else if (!isConversationActive) {
-                    startConversation();
+                style={styles.inlineMicButton}
+                onPress={async () => {
+                  // Simple transcription (NOT orb conversation)
+                  if (isSimpleRecording) {
+                    // Stop recording and get transcript
+                    const result = await stopSimpleRecording();
+                    if (result) {
+                      setTranscript(prev => (prev ? prev + ' ' + result : result));
+                    }
+                  } else {
+                    // Start recording
+                    startSimpleRecording();
                   }
                 }}
               >
                 <Ionicons
-                  name={isConversationActive ? "stop-circle" : "mic"}
-                  size={22}
-                  color={isConversationActive ? "#FF6B6B" : "#A0A0A0"}
+                  name={isSimpleRecording ? "stop-circle" : "mic"}
+                  size={26}
+                  color={isSimpleRecording ? "#FF6B6B" : "#A0A0A0"}
                 />
               </TouchableOpacity>
             </View>
@@ -1110,59 +1217,17 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { alignItems: 'center', paddingTop: 140, paddingHorizontal: 20, paddingBottom: 100 },
-
-  // ✅ FIXED HEADER - Stays at top, doesn't scroll
-  fixedHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    backgroundColor: 'transparent',
-    // pointerEvents: 'box-none' set in JSX - allows touches to pass through to ScrollView
-  },
+  scrollContent: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 20, paddingBottom: 100 },
 
   logoRow: {
-    position: 'absolute',
-    top: 60,
-    left: 20,
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    marginBottom: 40,
   },
   logoImg: { width: 50, height: 50, resizeMode: 'contain', marginRight: 3 },
   logoWord: { fontSize: 28, color: '#fff', fontWeight: '500', letterSpacing: 0.5 },
-
-  debugButton: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 50,
-    height: 50,
-    opacity: 0.01,
-  },
-
-  // 🔧 TESTING_ONLY_REMOVE_BEFORE_PRODUCTION - Visible reset button styles
-  visibleResetButton: {
-    backgroundColor: '#FF6B6B',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    marginVertical: 20,
-    alignSelf: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-
-  resetButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
 
   micContainer: { alignItems: 'center', marginTop: 0, marginBottom: 40 },
   orbMessage: {
@@ -1183,35 +1248,30 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 
-  prompt: { fontSize: 28, color: '#fff', marginBottom: 24, marginTop: 35, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
+  prompt: { fontSize: 28, color: '#fff', marginBottom: 24, marginTop: 20, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
   cursor: {
     color: '#fff',
     opacity: 0.7,
   },
   card: { backgroundColor: '#fff', borderRadius: 20, width: '100%', padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, minHeight: 600 },
 
-  transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100, paddingRight: 56 },
-
-  inputWithMicContainer: {
+  inputWithInlineMic: {
     position: 'relative',
     width: '100%',
   },
-  miniMicIcon: {
+  inlineMicButton: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    top: 8,
+    right: 0,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 2,
   },
+
+  transcriptTextInput: { fontSize: 22, color: '#0A2540', fontWeight: Platform.OS === 'ios' ? 'bold' : 'bold', marginTop: 16, marginBottom: 16, minHeight: 100, paddingRight: 52 },
 
   imageSection: { marginBottom: 20 },
   imageSectionTitle: { fontSize: 18, fontWeight: Platform.OS === 'ios' ? '700' : 'bold', color: '#0A2540', marginBottom: 4 },
