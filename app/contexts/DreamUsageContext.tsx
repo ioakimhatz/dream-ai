@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Alert } from 'react-native';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import Purchases, {
   PurchasesOffering,
   PurchasesPackage
@@ -13,7 +14,7 @@ import { db, auth } from '../config/firebaseConfig';
 
 // ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
 // TRUE on simulator/emulator, FALSE on physical device
-const isSimulator = !Constants.isDevice;
+const isSimulator = !Device.isDevice;
 
 interface DreamUsage {
   used: number;

@@ -464,6 +464,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.removeItem('user');
       console.log('✅ Cleared user from AsyncStorage');
 
+      await AsyncStorage.removeItem('permissions_requested');
+      console.log('✅ Cleared permissions flag from AsyncStorage');
+
       await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       setUser(null);
 

@@ -11,10 +11,12 @@ import { ActivityIndicator, Platform, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import Purchases from 'react-native-purchases';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 
-// ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
+// ✅ FIX: Use expo-device for reliable detection (Constants.isDevice can be undefined)
 // TRUE on simulator/emulator, FALSE on physical device
-const isSimulator = !Constants.isDevice;
+const isSimulator = !Device.isDevice;
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DreamUsageProvider } from './contexts/DreamUsageContext';
@@ -71,16 +73,13 @@ function AppContent() {
   useEffect(() => {
     const initializeRevenueCat = async () => {
       // Debug log to verify device detection
-      console.log(`🔍 Device Detection: Constants.isDevice=${Constants.isDevice}, isSimulator=${isSimulator}`);
+      console.log(`🔍 Device Detection: Device.isDevice=${Device.isDevice}, isSimulator=${isSimulator}, Platform.OS=${Platform.OS}`);
 
-      // ✅ TEMPORARILY DISABLED - Constants.isDevice returns undefined on iPhone 16 Pro Max
-      // This breaks simulator detection, so we're enabling RevenueCat on ALL devices for now
-      // TODO: Re-enable after fixing Constants.isDevice setup
-      // if (isSimulator) {
-      //   console.log('📱 Skipping RevenueCat initialization on simulator');
-      //   return;
-      // }
-      console.log('💰 RevenueCat initialization enabled on ALL devices (simulator check disabled)');
+      if (isSimulator) {
+        console.log('📱 Skipping RevenueCat initialization on simulator');
+        return;
+      }
+      console.log('💰 Initializing RevenueCat on REAL device');
 
       try {
         console.log('💰 Initializing RevenueCat...');
@@ -106,13 +105,23 @@ function AppContent() {
   // 🔔 Setup notification listeners
   useEffect(() => {
     console.log('📱 Setting up notification listeners...');
-    const cleanup = setupNotificationListeners();
+    const cleanup = setupNotificationListeners(router);
+
+    // Handle push token refresh
+    const tokenSubscription = Notifications.addPushTokenListener(async (token) => {
+      if (user?.id && token.data) {
+        const { saveFCMToken } = await import('./utils/notificationService');
+        await saveFCMToken(user.id, token.data);
+        console.log('🔄 Push token refreshed:', token.data);
+      }
+    });
 
     return () => {
       console.log('📱 Cleaning up notification listeners');
       cleanup();
+      tokenSubscription.remove();
     };
-  }, []);
+  }, [router, user?.id]);
 
   // 💤 Sync HealthKit data on app open
   useEffect(() => {

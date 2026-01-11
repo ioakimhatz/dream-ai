@@ -23,11 +23,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
 // TRUE on simulator/emulator, FALSE on physical device
-const isSimulator = !Constants.isDevice;
+const isSimulator = !Device.isDevice;
 
 let Notifications: any = null;
 if (!isSimulator) {
@@ -40,7 +41,7 @@ if (!isSimulator) {
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 import { useLanguage, SUPPORTED_LANGUAGES } from '../contexts/LanguageContext';
 import { SubscriptionModal } from '@/components/SubscriptionModal';
-import { registerForPushNotifications, saveFCMToken, sendTestNotification } from '../utils/notificationService';
+import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
 
 // 🔥 NEW: Import Firebase functions for account deletion
 import { deleteUser } from 'firebase/auth';
@@ -132,44 +133,6 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (user?.photo) setUserAvatar(user.photo);
   }, [user]);
-
-  const handleTestNotification = async () => {
-    if (isSimulator || !Notifications) {
-      Alert.alert('Simulator', 'Notifications are not available on iOS simulator. Please test on a real device.');
-      return;
-    }
-
-    if (!user) {
-      Alert.alert('Sign In Required', 'Please sign in to test notifications.');
-      return;
-    }
-
-    try {
-      console.log('📱 Sending test notification...');
-      const success = await sendTestNotification(user.id);
-
-      if (success) {
-        Alert.alert(
-          '✅ Test Sent',
-          'Check your notifications! The test notification should appear shortly.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Failed to Send',
-          'Could not send test notification. Make sure notifications are enabled.',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('Error sending test notification:', error);
-      Alert.alert(
-        'Error',
-        'Failed to send test notification. Please try again.',
-        [{ text: 'OK' }]
-      );
-    }
-  };
 
   const handleWakeTimeChange = () => {
     if (!user) {
@@ -720,17 +683,6 @@ export default function SettingsScreen() {
                   ios_backgroundColor="#E5E7EB"
                 />
               </View>
-
-              {/* Test Notification Button */}
-              {notificationsEnabled && (
-                <TouchableOpacity
-                  style={[styles.row, { marginTop: 8 }]}
-                  onPress={handleTestNotification}
-                >
-                  <Text style={styles.rowTitle}>Send Test Notification</Text>
-                  <Ionicons name="notifications-outline" size={22} color="#7278E6" />
-                </TouchableOpacity>
-              )}
 
               {/* Wake Time Setting */}
               {notificationsEnabled && (

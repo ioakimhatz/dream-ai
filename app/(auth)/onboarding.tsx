@@ -20,6 +20,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as StoreReview from 'expo-store-review';
 import { Platform } from 'react-native';
 import { useSleepData } from '../hooks/useSleepData';
+import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
 
 // ---- SAFETY NET: guard all icons so missing glyphs don't crash a step ----
 const hasGlyph = (name: string) => (Ionicons as any)?.glyphMap?.[name] != null;
@@ -163,6 +164,7 @@ export default function OnboardingScreen() {
         }
       });
     } else {
+      // Navigate to auth screen (permissions will be requested on first home screen load)
       router.push('/auth-select');
     }
   };

@@ -175,38 +175,46 @@ export default function HomeScreen() {
     return () => clearTimeout(t);
   }, []);
 
+
+  const { user } = useAuth();
+
+  // Request permissions on first load after auth
   useEffect(() => {
-    const requestMicPermission = async () => {
+    if (!user?.id) return;
+
+    const requestInitialPermissions = async () => {
       try {
-        const { status } = await Audio.requestPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Microphone Access Required',
-            'Dream AI needs microphone access to record your dreams. Please enable it in Settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: () => {
-                  if (Platform.OS === 'ios') {
-                    Linking.openURL('app-settings:');
-                  } else {
-                    Linking.openSettings();
-                  }
-                }
-              }
-            ]
-          );
+        // Check if permissions already requested
+        const permissionsRequested = await AsyncStorage.getItem('permissions_requested');
+        if (permissionsRequested === 'true') {
+          console.log('✅ Permissions already requested, skipping');
+          return;
         }
+
+        console.log('🔐 Requesting permissions on first home screen load...');
+
+        // 1. Request microphone permission
+        const { status: micStatus } = await Audio.requestPermissionsAsync();
+        console.log('🎤 Mic permission:', micStatus);
+
+        // 2. Request notification permission and save token
+        const { registerForPushNotifications, saveFCMToken } = await import('../utils/notificationService');
+        const token = await registerForPushNotifications();
+        if (token && user.id) {
+          await saveFCMToken(user.id, token);
+          console.log('✅ Push notifications registered on home screen');
+        }
+
+        // Mark as done
+        await AsyncStorage.setItem('permissions_requested', 'true');
+        console.log('✅ Permissions request flow completed');
       } catch (error) {
-        console.error('Error requesting mic permission:', error);
+        console.error('⚠️ Permission requests failed:', error);
       }
     };
 
-    requestMicPermission();
-  }, []);
-
-  const { user } = useAuth();
+    requestInitialPermissions();
+  }, [user?.id]);
 
   useEffect(() => {
     // Notification setup removed - now handled in onboarding

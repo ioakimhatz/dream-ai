@@ -7,20 +7,21 @@ import { getRandomMessage } from './notificationCopy';
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 /**
- * Scheduled function that runs every hour to send wake-up dream reminders
+ * Scheduled function that runs every 5 minutes to send wake-up dream reminders
+ * Sends 3 notifications: 10 min before, at wake time, and 10 min after
  * Matches users by wake time + timezone
  */
 export const sendDailyDreamReminders = functions
   .region('europe-west1')
   .runWith({ timeoutSeconds: 540, memory: '1GB' })
-  .pubsub.schedule('0 * * * *') // Every hour on the hour
+  .pubsub.schedule('*/5 * * * *') // Every 5 minutes for granular timing
   .timeZone('UTC')
   .onRun(async (context) => {
     const now = new Date();
     const currentHour = now.getUTCHours();
     const currentMinute = now.getUTCMinutes();
 
-    console.log(`🕐 Running scheduled notification check at UTC ${currentHour}:${currentMinute}`);
+    console.log(`⏰ Checking for wake-time notifications at ${currentHour}:${currentMinute} UTC`);
 
     try {
       // Query users with notifications enabled and device tokens
@@ -37,22 +38,12 @@ export const sendDailyDreamReminders = functions
 
       for (const userDoc of usersSnapshot.docs) {
         const userData = userDoc.data();
+        const userId = userDoc.id;
         const { deviceToken, wakeTime, timezone, lastNotificationSent } = userData;
 
         // Skip if no wake time or timezone configured
         if (!wakeTime || !timezone) {
           continue;
-        }
-
-        // Check if already notified in last 20 hours (prevent duplicates)
-        if (lastNotificationSent) {
-          const lastSentTime = lastNotificationSent.toDate();
-          const hoursSinceLastNotification = (now.getTime() - lastSentTime.getTime()) / (1000 * 60 * 60);
-
-          if (hoursSinceLastNotification < 20) {
-            console.log(`⏭️ Skipping user ${userDoc.id} - already notified ${hoursSinceLastNotification.toFixed(1)}h ago`);
-            continue;
-          }
         }
 
         // Parse user's wake time (format: "HH:MM")
@@ -63,37 +54,114 @@ export const sendDailyDreamReminders = functions
           continue;
         }
 
-        // Calculate timezone offset and convert to UTC
-        const timezoneOffset = getTimezoneOffset(timezone);
-        const utcWakeHour = (wakeHour - timezoneOffset + 24) % 24;
+        // Get timezone offset (use existing map or calculate)
+        const offset = getTimezoneOffset(timezone);
 
-        // Check if current hour matches wake hour (±1 hour tolerance)
-        const hourDifference = Math.abs(currentHour - utcWakeHour);
+        // Convert user's wake time to UTC
+        const wakeHourUTC = (wakeHour - offset + 24) % 24;
 
-        if (hourDifference <= 1 || hourDifference >= 23) {
-          console.log(`✅ Scheduling notification for user ${userDoc.id} (wake: ${wakeTime} ${timezone}, UTC: ${utcWakeHour}:00)`);
+        // Calculate notification times in UTC
+        const before10UTC = {
+          hour: wakeHourUTC,
+          minute: (wakeMinute - 10 + 60) % 60,
+          hourAdjust: wakeMinute < 10 ? -1 : 0
+        };
 
-          const message = getRandomMessage();
+        const atWakeUTC = {
+          hour: wakeHourUTC,
+          minute: wakeMinute
+        };
 
-          // Add to batch
+        const after10UTC = {
+          hour: wakeHourUTC,
+          minute: (wakeMinute + 10) % 60,
+          hourAdjust: wakeMinute >= 50 ? 1 : 0
+        };
+
+        // Adjust hours for minute wraparound
+        before10UTC.hour = (before10UTC.hour + before10UTC.hourAdjust + 24) % 24;
+        after10UTC.hour = (after10UTC.hour + after10UTC.hourAdjust + 24) % 24;
+
+        // Check if current time matches any notification window (±2 minutes for reliability)
+        const shouldSendBefore = Math.abs(currentHour - before10UTC.hour) === 0 &&
+                                 Math.abs(currentMinute - before10UTC.minute) <= 2;
+
+        const shouldSendAt = Math.abs(currentHour - atWakeUTC.hour) === 0 &&
+                            Math.abs(currentMinute - atWakeUTC.minute) <= 2;
+
+        const shouldSendAfter = Math.abs(currentHour - after10UTC.hour) === 0 &&
+                               Math.abs(currentMinute - after10UTC.minute) <= 2;
+
+        // Track which notifications were sent today
+        const today = now.toISOString().split('T')[0]; // "2026-01-11"
+        const notificationLog = lastNotificationSent || {};
+        const sentToday = (notificationLog.date === today) ? notificationLog : { date: today, before: false, at: false, after: false };
+
+        // Send BEFORE notification
+        if (shouldSendBefore && !sentToday.before) {
           notifications.push({
             to: deviceToken,
             sound: 'default',
-            title: message.title,
-            body: message.body,
+            title: "☀️ Good morning!",
+            body: "You'll wake up soon. Get ready to record your dream!",
             data: {
-              type: 'wake_reminder',
-              userId: userDoc.id,
+              type: 'dream_reminder',
+              timing: 'before',
+              userId: userId,
               timestamp: now.getTime(),
             },
             priority: 'high',
             channelId: 'default',
           });
+          sentToday.before = true;
+          console.log(`✅ Sent BEFORE notification to ${userId}`);
+        }
 
-          // Update last notification sent
+        // Send AT notification
+        if (shouldSendAt && !sentToday.at) {
+          notifications.push({
+            to: deviceToken,
+            sound: 'default',
+            title: "🌙 Dream Time!",
+            body: "Record your dream before it fades away",
+            data: {
+              type: 'dream_reminder',
+              timing: 'at',
+              userId: userId,
+              timestamp: now.getTime(),
+            },
+            priority: 'high',
+            channelId: 'default',
+          });
+          sentToday.at = true;
+          console.log(`✅ Sent AT notification to ${userId}`);
+        }
+
+        // Send AFTER notification
+        if (shouldSendAfter && !sentToday.after) {
+          notifications.push({
+            to: deviceToken,
+            sound: 'default',
+            title: "💭 Still remember your dream?",
+            body: "Last chance to capture it before it's gone!",
+            data: {
+              type: 'dream_reminder',
+              timing: 'after',
+              userId: userId,
+              timestamp: now.getTime(),
+            },
+            priority: 'high',
+            channelId: 'default',
+          });
+          sentToday.after = true;
+          console.log(`✅ Sent AFTER notification to ${userId}`);
+        }
+
+        // Update notification log in Firestore
+        if (sentToday.before || sentToday.at || sentToday.after) {
           userUpdates.push(
             userDoc.ref.update({
-              lastNotificationSent: admin.firestore.FieldValue.serverTimestamp(),
+              lastNotificationSent: sentToday,
             })
           );
         }
@@ -127,14 +195,14 @@ export const sendDailyDreamReminders = functions
 
           // Update Firestore with last notification sent
           await Promise.all(userUpdates);
-          console.log('✅ Updated lastNotificationSent for all users');
+          console.log('✅ Updated notification logs for all users');
 
         } catch (error) {
           console.error('❌ Failed to send notifications:', error);
           throw error;
         }
       } else {
-        console.log('📭 No users to notify at this hour');
+        console.log('📭 No users to notify at this time');
       }
 
       return null;

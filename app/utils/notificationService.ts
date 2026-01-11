@@ -5,8 +5,8 @@ import * as Device from 'expo-device';
 import { doc, setDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { firestore } from '../config/firebaseConfig';
 
-// Check if running on simulator (more reliable with expo-device)
-const isSimulator = false;
+// ✅ FIX: Use expo-device for reliable detection (Constants.isDevice can be undefined)
+const isSimulator = !Device.isDevice;
 
 // Dynamically import expo-notifications (not available on simulator)
 let Notifications: any = null;
@@ -36,10 +36,26 @@ if (!isSimulator) {
  * This is the main function to call for registering push notifications
  */
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (isSimulator || !Notifications) {
-    console.log('📱 Skipping notifications on simulator');
+  // DEBUG: Log device info
+  console.log('🔍 DEVICE DEBUG:');
+  console.log('  - Device.isDevice:', Device.isDevice);
+  console.log('  - Device.deviceType:', Device.deviceType);
+  console.log('  - Device.modelName:', Device.modelName);
+  console.log('  - Platform.OS:', Platform.OS);
+  console.log('  - Constants.isDevice:', Constants.isDevice);
+  console.log('  - isSimulator:', isSimulator);
+
+  if (!Device.isDevice) {
+    console.log('📱 Cannot register push notifications on simulator');
     return null;
   }
+
+  if (!Notifications) {
+    console.log('⚠️ Notifications module not available');
+    return null;
+  }
+
+  console.log('📱 Registering for push notifications on REAL device...');
 
   try {
     // Request permission via Expo (works on both iOS and Android)
@@ -302,7 +318,7 @@ export async function sendVideoFailedNotification(jobId?: string): Promise<void>
 /**
  * Setup notification listeners
  */
-export function setupNotificationListeners() {
+export function setupNotificationListeners(router?: any) {
   if (isSimulator || !Notifications) {
     console.log('📱 Skipping notification listeners on simulator');
     return () => { }; // Return empty cleanup function
@@ -315,12 +331,22 @@ export function setupNotificationListeners() {
 
   // Handle notification tapped
   const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-    console.log('👆 Notification tapped:', response);
-    const { videoUrl, type } = response.notification.request.content.data;
+    const data = response.notification.request.content.data;
 
-    if (type === 'video_ready' && videoUrl) {
-      // Navigate to video or open it
-      console.log('📹 Opening video:', videoUrl);
+    console.log('📱 User tapped notification:', data);
+
+    // Route based on notification type
+    if (router) {
+      if (data?.videoUrl || data?.jobId) {
+        // Video ready notification - go to library
+        router.push('/(tabs)/library');
+      } else if (data?.type === 'wake_reminder' || data?.type === 'dream_reminder') {
+        // Wake-up reminder - go to home (dream entry)
+        router.push('/(tabs)/');
+      } else {
+        // Default - go to home
+        router.push('/(tabs)/');
+      }
     }
   });
 
