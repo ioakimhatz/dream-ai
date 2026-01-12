@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Purchases from 'react-native-purchases';
 import { useAuth } from '../contexts/AuthContext';
 import { useDreamUsage } from '../contexts/DreamUsageContext';
 
@@ -32,22 +31,18 @@ export default function HardPaywallModal({ visible, onClose, onSelectPlan }: Har
   });
   const [isPurchasing, setIsPurchasing] = React.useState(false);
   const { user } = useAuth();
-  const { refreshSubscriptionStatus, dreamUsage } = useDreamUsage();
+  const { offerings, purchaseSubscription, restorePurchases } = useDreamUsage();
 
   if (!fontsLoaded) return null;
 
   const handleRestore = async () => {
     try {
-      const customerInfo = await Purchases.restorePurchases();
-      if (customerInfo.activeSubscriptions.length > 0) {
-        Alert.alert('Success', 'Purchases restored successfully!');
-        onClose();
-      } else {
-        Alert.alert('No Purchases', 'No active subscriptions found.');
-      }
+      // ✅ Use restorePurchases from context - handles all sync logic
+      await restorePurchases();
+      onClose();
     } catch (error) {
       console.error('Restore failed:', error);
-      Alert.alert('Error', 'Failed to restore purchases.');
+      // Context already shows alerts, so we don't need to show another one here
     }
   };
 
@@ -58,73 +53,34 @@ export default function HardPaywallModal({ visible, onClose, onSelectPlan }: Har
       return;
     }
 
+    if (!user) {
+      Alert.alert('Error', 'Please sign in first');
+      return;
+    }
+
     setIsPurchasing(true);
 
     try {
-      // 🔥 FIX 1: Ensure RevenueCat is logged in with Firebase user ID BEFORE purchase
-      if (!user) {
-        Alert.alert('Error', 'Please sign in first');
-        return;
-      }
-
-      console.log('🔐 Ensuring RevenueCat is logged in with user:', user.id);
-
-      try {
-        // Invalidate cache and login
-        await Purchases.invalidateCustomerInfoCache();
-        await Purchases.logIn(user.id);
-        console.log('✅ RevenueCat logged in successfully');
-      } catch (loginError: any) {
-        if (!loginError.message?.includes('already')) {
-          console.error('❌ RevenueCat login failed:', loginError);
-          throw loginError;
-        }
-        console.log('✅ Already logged in to RevenueCat');
-      }
-
-      // Verify the login worked
-      const preCustomerInfo = await Purchases.getCustomerInfo();
-      console.log('🔍 Pre-purchase RC user:', preCustomerInfo.originalAppUserId);
-      console.log('🔍 Firebase user:', user.id);
-
-      if (preCustomerInfo.originalAppUserId !== user.id) {
-        console.error('❌ RC user ID mismatch after login!');
-        Alert.alert('Error', 'Failed to link account. Please try again.');
-        return;
-      }
-
-      const offerings = await Purchases.getOfferings();
-      const weeklyPackage = offerings.current?.availablePackages.find(
+      // Find weekly package from offerings (already loaded by DreamUsageContext)
+      const weeklyPackage = offerings?.availablePackages.find(
         pkg => pkg.identifier === '$rc_weekly' || pkg.product.identifier.includes('weekly')
       );
 
-      if (weeklyPackage) {
-        console.log('💳 Purchasing with verified user:', user.id);
-        const { customerInfo } = await Purchases.purchasePackage(weeklyPackage);
-
-        if (customerInfo.activeSubscriptions.length > 0) {
-          console.log('✅ Purchase successful! Active subscriptions found.');
-
-          // 🔥 FIX 2: Force refresh subscription status to sync credits
-          console.log('🔄 Forcing credit sync...');
-          await refreshSubscriptionStatus();
-
-          // Wait a moment for Firestore to update
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-          Alert.alert('🎉 Success!', 'Welcome to Dream AI! Generating your dream...', [
-            {
-              text: 'OK',
-              onPress: () => {
-                onClose();
-                // Trigger video generation after successful purchase
-                onSelectPlan('weekly');
-              }
-            }
-          ]);
-        }
-      } else {
+      if (!weeklyPackage) {
         Alert.alert('Error', 'Weekly subscription not available.');
+        return;
+      }
+
+      console.log('💳 Purchasing weekly plan...');
+
+      // ✅ Use purchaseSubscription from context - handles all RevenueCat sync logic
+      const success = await purchaseSubscription(weeklyPackage);
+
+      if (success) {
+        console.log('✅ Purchase successful!');
+        onClose();
+        // Trigger video generation after successful purchase
+        onSelectPlan('weekly');
       }
     } catch (error: any) {
       if (!error.userCancelled) {
@@ -132,7 +88,6 @@ export default function HardPaywallModal({ visible, onClose, onSelectPlan }: Har
         Alert.alert('Purchase Failed', error.message || 'Please try again');
       }
     } finally {
-      // Always reset flag
       setIsPurchasing(false);
     }
   };

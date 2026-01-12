@@ -686,46 +686,13 @@ export default function SettingsScreen() {
 
               {/* Wake Time Setting */}
               {notificationsEnabled && (
-                <>
-                  <TouchableOpacity
-                    style={[styles.row, { marginTop: 8 }]}
-                    onPress={handleWakeTimeChange}
-                  >
-                    <Text style={styles.rowTitle}>Wake Up Time: {wakeTime}</Text>
-                    <Ionicons name="time-outline" size={22} color="#7278E6" />
-                  </TouchableOpacity>
-
-                  {/* Wake Time Source */}
-                  <View style={[styles.row, { marginTop: 8, opacity: 0.7 }]}>
-                    <Text style={styles.rowTitle}>
-                      Source: {wakeTimeSource === 'healthkit' ? 'Health App' : 'Manual'}
-                    </Text>
-                    {wakeTimeSource === 'healthkit' ? (
-                      <Ionicons name="fitness-outline" size={22} color="#7278E6" />
-                    ) : (
-                      <Ionicons name="create-outline" size={22} color="#7278E6" />
-                    )}
-                  </View>
-
-                  {/* Connect/Disconnect HealthKit */}
-                  {wakeTimeSource === 'manual' ? (
-                    <TouchableOpacity
-                      style={[styles.row, { marginTop: 8 }]}
-                      onPress={handleConnectHealthKit}
-                    >
-                      <Text style={styles.rowTitle}>Connect Health App</Text>
-                      <Ionicons name="add-circle-outline" size={22} color="#7278E6" />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={[styles.row, { marginTop: 8 }]}
-                      onPress={handleDisconnectHealthKit}
-                    >
-                      <Text style={[styles.rowTitle, { color: '#FF3B30' }]}>Disconnect Health App</Text>
-                      <Ionicons name="close-circle-outline" size={22} color="#FF3B30" />
-                    </TouchableOpacity>
-                  )}
-                </>
+                <TouchableOpacity
+                  style={[styles.row, { marginTop: 8 }]}
+                  onPress={handleWakeTimeChange}
+                >
+                  <Text style={styles.rowTitle}>Wake Up Time: {wakeTime}</Text>
+                  <Ionicons name="time-outline" size={22} color="#7278E6" />
+                </TouchableOpacity>
               )}
             </View>
           ) : (

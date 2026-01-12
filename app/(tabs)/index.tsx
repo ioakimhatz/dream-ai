@@ -1215,44 +1215,36 @@ export default function HomeScreen() {
         onSelectPlan={async (planType, quantity) => {
           setShowHardPaywall(false);
 
-          // 🔥 FIX 3: Wait for credits to sync before starting generation
-          console.log('✅ Hard paywall purchase complete - waiting for credits to sync...');
+          // ✅ Use the WORKING verification approach (direct Firestore query)
+          try {
+            if (!user) return;
 
-          // Poll for credits with timeout (max 15 seconds)
-          let attempts = 0;
-          const maxAttempts = 30; // 30 attempts * 500ms = 15 seconds
-          let creditsAvailable = false;
+            console.log('🔍 Verifying dreams after purchase...');
+            const usageRef = doc(db, 'dreamUsage', user.id);
+            const usageSnap = await getDoc(usageRef);
 
-          while (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (usageSnap.exists()) {
+              const usageData = usageSnap.data();
+              const used = usageData.used || 0;
+              const total = usageData.total || 0;
 
-            // Check if credits are available
-            if (dreamUsage.total > 0 && dreamUsage.used < dreamUsage.total) {
-              console.log(`✅ Credits synced! Total: ${dreamUsage.total}, Used: ${dreamUsage.used}`);
-              creditsAvailable = true;
-              break;
+              console.log(`📊 Post-purchase dream check: ${used}/${total}`);
+
+              if (used >= total) {
+                Alert.alert('Error', 'Unable to verify dream availability. Please try again in a moment.');
+                return;
+              }
             }
 
-            attempts++;
-            console.log(`⏳ Waiting for credits... Attempt ${attempts}/${maxAttempts}`);
-          }
-
-          if (!creditsAvailable) {
-            console.error('❌ Credits not synced after 15 seconds');
-            Alert.alert(
-              'Credit Sync Timeout',
-              'Your purchase was successful, but credits are taking longer than expected to sync.\n\nPlease wait a moment and tap the Generate button again.',
-              [{ text: 'OK' }]
-            );
-            return;
-          }
-
-          // Credits are available, start generation
-          try {
-            console.log('🎬 Starting video generation with credits:', dreamUsage);
+            console.log('✅ Dreams verified - proceeding with generation');
             await proceedWithGeneration();
+
+            setTimeout(() => {
+              Alert.alert('🎉 Success!', 'Generating your dream cinema...', [{ text: 'Great!', style: 'default' }]);
+            }, 500);
+
           } catch (error) {
-            console.error('❌ Error starting generation after hard paywall purchase:', error);
+            console.error('❌ Error verifying dreams after purchase:', error);
             Alert.alert('Error', 'Purchase successful! Please tap Generate again to create your dream.');
           }
         }}
