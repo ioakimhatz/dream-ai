@@ -43,6 +43,7 @@ import { syncDreamsFromFirestore } from '../services/syncService';
 
 import { SubscriptionModal } from '@/components/SubscriptionModal';
 import { BlurredDreamPreview } from '@/components/BlurredDreamPreview';
+import HardPaywallModal from '../components/HardPaywallModal';
 
 interface PromptAnalysis {
   strength: 'WEAK' | 'FAIR' | 'GOOD' | 'EXCELLENT';
@@ -216,6 +217,7 @@ export default function HomeScreen() {
     requestInitialPermissions();
   }, [user?.id]);
 
+
   useEffect(() => {
     // Notification setup removed - now handled in onboarding
     // Users will set wake time and grant notification permissions during onboarding flow
@@ -245,6 +247,7 @@ export default function HomeScreen() {
   } = useDreamUsage();
 
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showHardPaywall, setShowHardPaywall] = useState(false);
   const [showBlurredPreview, setShowBlurredPreview] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
 
@@ -800,21 +803,9 @@ export default function HomeScreen() {
 
       // 🔥 STEP 2: Check subscription if no credits
       if (!subscription) {
-        // No credits AND no subscription - show paywall preview
-        console.log('⚠️ No subscription found - showing paywall preview');
-        setIsGenerating(true);
-        setGenerationProgress(0);
-        setGenerationStep('Analyzing your dream…');
-        const iv = setInterval(() => setGenerationProgress(prev => Math.min(prev + 25, 100)), 1000);
-        setTimeout(() => setGenerationStep('Creating scenes…'), 1000);
-        setTimeout(() => setGenerationStep('Almost ready…'), 2500);
-        setTimeout(() => {
-          clearInterval(iv);
-          setIsGenerating(false);
-          setGenerationProgress(0);
-          setGenerationStep('');
-          setShowBlurredPreview(true);
-        }, 4000);
+        // No credits AND no subscription - show hard paywall modal
+        console.log('⚠️ No subscription found - showing hard paywall');
+        setShowHardPaywall(true);
         return;
       }
 
@@ -835,11 +826,9 @@ export default function HomeScreen() {
       console.log(`📊 Subscription dream availability: ${used}/${total}`);
 
       if (used >= total) {
-        Alert.alert(
-          'Dream Limit Reached',
-          `You've used all ${total} dreams for this period. Next reset: ${new Date(usageData.resetDate?.toDate?.() || usageData.resetDate).toLocaleDateString()}\n\nTip: Purchase additional dreams to continue creating!`,
-          [{ text: 'OK', style: 'cancel' }]
-        );
+        // Dream limit reached - show hard paywall modal
+        console.log('⚠️ Dream limit reached - showing hard paywall');
+        setShowHardPaywall(true);
         return;
       }
 
@@ -1218,6 +1207,55 @@ export default function HomeScreen() {
         onSelectPlan={handleSelectPlan}
         currentId={subscription?.id}
         isPurchasing={isPurchasing}
+      />
+
+      <HardPaywallModal
+        visible={showHardPaywall}
+        onClose={() => setShowHardPaywall(false)}
+        onSelectPlan={async (planType, quantity) => {
+          setShowHardPaywall(false);
+
+          // 🔥 FIX 3: Wait for credits to sync before starting generation
+          console.log('✅ Hard paywall purchase complete - waiting for credits to sync...');
+
+          // Poll for credits with timeout (max 15 seconds)
+          let attempts = 0;
+          const maxAttempts = 30; // 30 attempts * 500ms = 15 seconds
+          let creditsAvailable = false;
+
+          while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Check if credits are available
+            if (dreamUsage.total > 0 && dreamUsage.used < dreamUsage.total) {
+              console.log(`✅ Credits synced! Total: ${dreamUsage.total}, Used: ${dreamUsage.used}`);
+              creditsAvailable = true;
+              break;
+            }
+
+            attempts++;
+            console.log(`⏳ Waiting for credits... Attempt ${attempts}/${maxAttempts}`);
+          }
+
+          if (!creditsAvailable) {
+            console.error('❌ Credits not synced after 15 seconds');
+            Alert.alert(
+              'Credit Sync Timeout',
+              'Your purchase was successful, but credits are taking longer than expected to sync.\n\nPlease wait a moment and tap the Generate button again.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+
+          // Credits are available, start generation
+          try {
+            console.log('🎬 Starting video generation with credits:', dreamUsage);
+            await proceedWithGeneration();
+          } catch (error) {
+            console.error('❌ Error starting generation after hard paywall purchase:', error);
+            Alert.alert('Error', 'Purchase successful! Please tap Generate again to create your dream.');
+          }
+        }}
       />
     </View>
   );
