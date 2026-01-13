@@ -1,6 +1,7 @@
 // functions/src/scheduledNotifications.ts
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import * as moment from 'moment-timezone';
 import { getRandomMessage } from './notificationCopy';
 
 // Expo Push Notification API
@@ -46,51 +47,35 @@ export const sendDailyDreamReminders = functions
           continue;
         }
 
-        // Parse user's wake time (format: "HH:MM")
-        const [wakeHour, wakeMinute] = wakeTime.split(':').map(Number);
+        // Convert user's local wake time to UTC using moment-timezone
+        const utcTime = convertLocalTimeToUTC(wakeTime, timezone);
 
-        if (isNaN(wakeHour) || isNaN(wakeMinute)) {
-          console.warn(`⚠️ Invalid wake time for user ${userDoc.id}: ${wakeTime}`);
+        // Calculate the 3 notification windows: -10min, 0min, +10min using moment
+        const beforeWindowStart = moment.utc()
+          .hours(utcTime.hours)
+          .minutes(utcTime.minutes)
+          .subtract(10, 'minutes');
+
+        const atWindow = moment.utc()
+          .hours(utcTime.hours)
+          .minutes(utcTime.minutes);
+
+        const afterWindowStart = moment.utc()
+          .hours(utcTime.hours)
+          .minutes(utcTime.minutes)
+          .add(10, 'minutes');
+
+        const nowMoment = moment.utc();
+
+        // Check if current time matches any window (±2 minutes tolerance)
+        const shouldSendBefore = Math.abs(nowMoment.diff(beforeWindowStart, 'minutes')) <= 2;
+        const shouldSendAt = Math.abs(nowMoment.diff(atWindow, 'minutes')) <= 2;
+        const shouldSendAfter = Math.abs(nowMoment.diff(afterWindowStart, 'minutes')) <= 2;
+
+        // Skip if no window matches
+        if (!shouldSendBefore && !shouldSendAt && !shouldSendAfter) {
           continue;
         }
-
-        // Get timezone offset (use existing map or calculate)
-        const offset = getTimezoneOffset(timezone);
-
-        // Convert user's wake time to UTC
-        const wakeHourUTC = (wakeHour - offset + 24) % 24;
-
-        // Calculate notification times in UTC
-        const before10UTC = {
-          hour: wakeHourUTC,
-          minute: (wakeMinute - 10 + 60) % 60,
-          hourAdjust: wakeMinute < 10 ? -1 : 0
-        };
-
-        const atWakeUTC = {
-          hour: wakeHourUTC,
-          minute: wakeMinute
-        };
-
-        const after10UTC = {
-          hour: wakeHourUTC,
-          minute: (wakeMinute + 10) % 60,
-          hourAdjust: wakeMinute >= 50 ? 1 : 0
-        };
-
-        // Adjust hours for minute wraparound
-        before10UTC.hour = (before10UTC.hour + before10UTC.hourAdjust + 24) % 24;
-        after10UTC.hour = (after10UTC.hour + after10UTC.hourAdjust + 24) % 24;
-
-        // Check if current time matches any notification window (±2 minutes for reliability)
-        const shouldSendBefore = Math.abs(currentHour - before10UTC.hour) === 0 &&
-                                 Math.abs(currentMinute - before10UTC.minute) <= 2;
-
-        const shouldSendAt = Math.abs(currentHour - atWakeUTC.hour) === 0 &&
-                            Math.abs(currentMinute - atWakeUTC.minute) <= 2;
-
-        const shouldSendAfter = Math.abs(currentHour - after10UTC.hour) === 0 &&
-                               Math.abs(currentMinute - after10UTC.minute) <= 2;
 
         // Track which notifications were sent today
         const today = now.toISOString().split('T')[0]; // "2026-01-11"
@@ -214,64 +199,36 @@ export const sendDailyDreamReminders = functions
   });
 
 /**
- * Simple timezone offset helper
- * Maps common timezone names to UTC offset in hours
- * Can be improved with moment-timezone if needed for better accuracy
+ * Converts user's local wake time to UTC using moment-timezone
+ * Handles ALL timezones and DST automatically
  */
-function getTimezoneOffset(timezone: string): number {
-  // Common timezone offsets (standard time, not DST)
-  const offsets: Record<string, number> = {
-    // US & Canada
-    'America/New_York': -5,
-    'America/Chicago': -6,
-    'America/Denver': -7,
-    'America/Los_Angeles': -8,
-    'America/Phoenix': -7,
-    'America/Anchorage': -9,
-    'America/Honolulu': -10,
-    'America/Toronto': -5,
-    'America/Vancouver': -8,
+function convertLocalTimeToUTC(
+  localTime: string, // e.g., "21:44"
+  timezone: string    // e.g., "Europe/Athens"
+): { hours: number; minutes: number } {
+  try {
+    // Parse wake time (HH:MM format)
+    const [hours, minutes] = localTime.split(':').map(Number);
 
-    // Europe
-    'Europe/London': 0,
-    'Europe/Paris': 1,
-    'Europe/Berlin': 1,
-    'Europe/Rome': 1,
-    'Europe/Madrid': 1,
-    'Europe/Amsterdam': 1,
-    'Europe/Brussels': 1,
-    'Europe/Vienna': 1,
-    'Europe/Stockholm': 1,
-    'Europe/Moscow': 3,
+    // Set today's date with user's wake time in their timezone
+    const localWakeTime = moment.tz(timezone)
+      .hours(hours)
+      .minutes(minutes)
+      .seconds(0);
 
-    // Asia
-    'Asia/Tokyo': 9,
-    'Asia/Shanghai': 8,
-    'Asia/Hong_Kong': 8,
-    'Asia/Singapore': 8,
-    'Asia/Dubai': 4,
-    'Asia/Kolkata': 5.5,
-    'Asia/Bangkok': 7,
+    // Convert to UTC
+    const utcTime = localWakeTime.utc();
 
-    // Australia
-    'Australia/Sydney': 10,
-    'Australia/Melbourne': 10,
-    'Australia/Brisbane': 10,
-    'Australia/Perth': 8,
+    console.log(`🌍 Timezone conversion: ${localTime} ${timezone} → ${utcTime.format('HH:mm')} UTC`);
 
-    // Other
-    'Pacific/Auckland': 12,
-    'America/Sao_Paulo': -3,
-    'America/Mexico_City': -6,
-    'America/Buenos_Aires': -3,
-  };
-
-  const offset = offsets[timezone];
-
-  if (offset === undefined) {
-    console.warn(`⚠️ Unknown timezone: ${timezone}, using UTC offset 0`);
-    return 0;
+    return {
+      hours: utcTime.hours(),
+      minutes: utcTime.minutes()
+    };
+  } catch (error) {
+    console.error(`❌ Error converting timezone ${timezone}:`, error);
+    // Fallback: assume UTC if timezone is invalid
+    const [hours, minutes] = localTime.split(':').map(Number);
+    return { hours, minutes };
   }
-
-  return offset;
 }

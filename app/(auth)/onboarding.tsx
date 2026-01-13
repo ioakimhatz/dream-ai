@@ -111,25 +111,38 @@ export default function OnboardingScreen() {
 
     // Save wake time and trigger App Store review when leaving wake_time_picker
     if (current.type === 'wake_time_picker') {
-      // Save wake time to Firestore
-      if (auth.currentUser) {
-        try {
-          const hours = wakeTime.getHours();
-          const minutes = wakeTime.getMinutes();
-          const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+      // Save wake time (works even before authentication)
+      try {
+        const hours = wakeTime.getHours();
+        const minutes = wakeTime.getMinutes();
+        const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+        // Always save to AsyncStorage first (works even without auth)
+        await AsyncStorage.setItem('@dream_ai:pending_wake_time', JSON.stringify({
+          wakeTime: timeString,
+          wakeTimeSource: 'manual',
+          timezone: timezone,
+          savedAt: new Date().toISOString()
+        }));
+        console.log('✅ Wake time saved to AsyncStorage:', timeString);
+
+        // If user is already authenticated, sync to Firestore immediately
+        if (auth.currentUser) {
           const userRef = doc(db, 'users', auth.currentUser.uid);
           await setDoc(userRef, {
             wakeTime: timeString,
             wakeTimeSource: 'manual',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timezone: timezone,
             updatedAt: serverTimestamp()
           }, { merge: true });
 
-          console.log('✅ Wake time saved:', timeString);
-        } catch (error) {
-          console.error('Failed to save wake time:', error);
+          // Clear AsyncStorage since it's now in Firestore
+          await AsyncStorage.removeItem('@dream_ai:pending_wake_time');
+          console.log('✅ Wake time synced to Firestore immediately');
         }
+      } catch (error) {
+        console.error('Failed to save wake time:', error);
       }
 
       // Trigger native App Store review popup

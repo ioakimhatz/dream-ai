@@ -284,8 +284,33 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     // }
 
     try {
-      console.log('🔐 Logging in to RevenueCat with user:', userId);
+      console.log('🔐 Starting RevenueCat login for user:', userId);
 
+      // Step 1: Get current RevenueCat user
+      const currentInfo = await Purchases.getCustomerInfo();
+      const currentRCUser = currentInfo.originalAppUserId;
+      console.log('📊 Current RC user BEFORE login:', currentRCUser);
+
+      // Step 2: Check if we're already logged in as this user
+      if (currentRCUser === userId) {
+        console.log('✅ Already logged in as this user, skipping login');
+        return;
+      }
+
+      // Step 3: If we're an anonymous user, transition to identified user
+      if (currentRCUser.startsWith('$RCAnonymousID')) {
+        console.log('🔄 Transitioning from anonymous to identified user...');
+        console.log('   Anonymous ID:', currentRCUser);
+        console.log('   Target User:', userId);
+      } else {
+        // We're logged in as a different identified user - logout first
+        console.log('⚠️ Already logged in as different user:', currentRCUser);
+        console.log('   Logging out before switching to:', userId);
+        await Purchases.logOut();
+        console.log('✅ Logged out from previous user');
+      }
+
+      // Step 4: Clear cache before login
       try {
         await Purchases.invalidateCustomerInfoCache();
         console.log('🗑️ Cache invalidated before login');
@@ -293,12 +318,26 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         console.warn('⚠️ Cache invalidation warning:', e);
       }
 
-      await Purchases.logIn(userId);
-      console.log('✅ Logged in to RevenueCat with user:', userId);
-    } catch (error: any) {
-      if (!error.message?.includes('already')) {
-        console.error('❌ RevenueCat login error:', error);
+      // Step 5: Log in with new user
+      const { customerInfo } = await Purchases.logIn(userId);
+      console.log('✅ RevenueCat login successful');
+      console.log('   RC User ID:', customerInfo.originalAppUserId);
+      console.log('   Expected ID:', userId);
+
+      // Step 6: Verify the login worked
+      if (customerInfo.originalAppUserId !== userId) {
+        console.error('❌ LOGIN VERIFICATION FAILED!');
+        console.error('   RC returned:', customerInfo.originalAppUserId);
+        console.error('   Expected:', userId);
+        throw new Error('RevenueCat user ID mismatch after login');
       }
+
+      console.log('✅ Login verification passed');
+    } catch (error: any) {
+      console.error('❌ RevenueCat login error:', error);
+      console.error('   Error code:', error.code);
+      console.error('   Error message:', error.message);
+      throw error; // Re-throw to let caller handle
     }
   };
 
@@ -993,8 +1032,21 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
         const result = await Purchases.purchasePackage(consumablePackage);
         customerInfo = result.customerInfo;
       } else {
-        console.log('⚠️ Package not found, trying direct purchase');
-        const result = await Purchases.purchaseStoreProduct(PRODUCT_IDS.consumable);
+        console.log('⚠️ Package not found, trying direct purchase with getProducts()');
+
+        // RevenueCat 9.x requires getProducts() first to get StoreProduct objects
+        console.log('📦 Calling getProducts for:', PRODUCT_IDS.consumable);
+        const products = await Purchases.getProducts([PRODUCT_IDS.consumable]);
+        console.log('📦 Products returned:', products.length, products.map(p => p.identifier));
+
+        if (products.length === 0) {
+          throw new Error(`Product ${PRODUCT_IDS.consumable} not found in App Store Connect. Make sure the product is approved and available.`);
+        }
+
+        const product = products[0];
+        console.log('✅ Found product:', product.identifier, 'Price:', product.priceString);
+
+        const result = await Purchases.purchaseStoreProduct(product);
         customerInfo = result.customerInfo;
       }
 

@@ -26,6 +26,9 @@ import { auth } from '../config/firebaseConfig';
 // 🔔 Notification service
 import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
 
+// 🔄 Pending data sync
+import { syncPendingWakeTime } from '../utils/syncPendingData';
+
 export interface User {
   id: string;
   email: string;
@@ -77,6 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await AsyncStorage.setItem('user', JSON.stringify(userData));
           setUser(userData);
           console.log('✅ User saved to AsyncStorage:', userData.id);
+
+          // 🔄 Sync any pending wake time from onboarding
+          await syncPendingWakeTime(firebaseUser.uid);
         } else {
           console.log('❌ No Firebase user, clearing state');
           setUser(null);
@@ -466,6 +472,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       await AsyncStorage.removeItem('permissions_requested');
       console.log('✅ Cleared permissions flag from AsyncStorage');
+
+      // 🔄 Clear any pending wake time data
+      await AsyncStorage.removeItem('@dream_ai:pending_wake_time');
+      console.log('✅ Cleared pending wake time from AsyncStorage');
 
       await AsyncStorage.setItem('hasCompletedOnboarding', 'false');
       setUser(null);

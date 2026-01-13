@@ -70,6 +70,7 @@ function AppContent() {
     checkOnboardingStatus();
   }, []);
 
+  // ✅ Configure RevenueCat ONCE on app start (no dependencies)
   useEffect(() => {
     const initializeRevenueCat = async () => {
       // Debug log to verify device detection
@@ -82,25 +83,21 @@ function AppContent() {
       console.log('💰 Initializing RevenueCat on REAL device');
 
       try {
-        console.log('💰 Initializing RevenueCat...');
+        console.log('💰 Configuring RevenueCat (ONE TIME ONLY)...');
         if (Platform.OS === 'android') {
           await Purchases.configure({ apiKey: '***REMOVED***' });
         } else if (Platform.OS === 'ios') {
           await Purchases.configure({ apiKey: 'appl_vRUwRfxjglNcNpuBpAOGxFSKohU' });
         }
-        const rcId = user?.id ?? null;
-        if (rcId) {
-          console.log('💰 Logging into RevenueCat with user:', rcId);
-          await Purchases.logIn(rcId);
-        }
         if (__DEV__) Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
-        console.log('✅ RevenueCat initialized successfully');
+        console.log('✅ RevenueCat configured successfully');
+        console.log('ℹ️ User login will be handled by DreamUsageContext when user authenticates');
       } catch (error) {
         console.error('❌ Error initializing RevenueCat:', error);
       }
     };
     initializeRevenueCat();
-  }, [user]);
+  }, []); // ✅ Empty dependency array = runs once on mount
 
   // 🔔 Setup notification listeners
   useEffect(() => {
