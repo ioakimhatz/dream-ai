@@ -17,6 +17,8 @@ prepare_react_native_project!
 # 🔥 Enable Firebase as static framework
 $RNFirebaseAsStaticFramework = true
 
+# TikTok tracking moved to server-side (Events API)
+
 target 'DreamAI' do
   use_expo_modules!
 

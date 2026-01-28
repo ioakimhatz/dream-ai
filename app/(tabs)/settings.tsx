@@ -716,6 +716,7 @@ export default function SettingsScreen() {
             {isLoadingSubscription ? (
               <ActivityIndicator size="small" color="#7278E6" />
             ) : user && subscription ? (
+              // Active subscription
               <>
                 <View style={styles.planBadge}>
                   <Text style={styles.planBadgeText}>{subscription.name}</Text>
@@ -754,7 +755,42 @@ export default function SettingsScreen() {
                   <Text style={styles.manageButtonText}>Change Plan</Text>
                 </TouchableOpacity>
               </>
+            ) : user && (dreamUsage.total - dreamUsage.used) > 0 ? (
+              // No subscription but has custom credits
+              <>
+                <View style={styles.planBadge}>
+                  <Text style={styles.planBadgeText}>Dream Credits</Text>
+                </View>
+
+                <View style={styles.usageContainer}>
+                  <View style={styles.dreamsRemainingContainer}>
+                    <Text style={styles.dreamsRemainingBig}>
+                      {dreamUsage.total - dreamUsage.used}
+                    </Text>
+                    <Text style={styles.dreamsRemainingLabel}>
+                      dream{(dreamUsage.total - dreamUsage.used) !== 1 ? 's' : ''} remaining
+                    </Text>
+                  </View>
+
+                  <View style={styles.progressBar}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${(dreamUsage.used / dreamUsage.total) * 100}%` },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.manageButton}
+                  onPress={() => setShowSubscriptionModal(true)}
+                >
+                  <Text style={styles.manageButtonText}>Buy More Dreams</Text>
+                </TouchableOpacity>
+              </>
             ) : (
+              // No subscription and no credits
               <>
                 <View style={styles.freeAccountInfo}>
                   <Text style={styles.freeAccountTitle}>

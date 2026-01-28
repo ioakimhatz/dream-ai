@@ -115,7 +115,7 @@ export default function HardPaywallModal({ visible, onClose, onSelectPlan }: Har
           {/* Phone Mockup with Video */}
           <View style={styles.mockupContainer}>
             <Video
-              source={{ uri: 'https://res.cloudinary.com/dsfqvxje5/video/upload/v1758446232/d8vn6s2ed54zxcazo2dv.mp4' }}
+              source={{ uri: 'https://res.cloudinary.com/dsfqvxje5/video/upload/v1768482394/vwu1dpviabbo4cosgdfa.mp4' }}
               style={styles.videoInPhone}
               resizeMode={ResizeMode.COVER}
               shouldPlay
@@ -192,15 +192,17 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     marginTop: 45,
     marginBottom: 5,
+    zIndex: 10,  // Bring text in front of video
   },
 
   // Phone Mockup
   mockupContainer: {
     alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 40,
+    marginTop: -26,          // Moved higher
+    marginBottom: 35,
     width: '100%',
-    paddingHorizontal: 40,
+    paddingHorizontal: 24,   // Slightly smaller
+    marginLeft: 16,
   },
   videoInPhone: {
     width: '100%',

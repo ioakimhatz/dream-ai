@@ -11,6 +11,7 @@ import Purchases, {
 import { useAuth } from './AuthContext';
 import { doc, getDoc, setDoc, updateDoc, Timestamp, onSnapshot, increment, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { db, auth } from '../config/firebaseConfig';
+import { trackSubscriptionPurchased, trackCreditsPurchased, trackInitiateCheckout, trackAddToCart, trackViewedPaywall } from '../services/analyticsService';
 
 // ✅ FIX: Reliable simulator detection (works on iPhone 16 Pro Max)
 // TRUE on simulator/emulator, FALSE on physical device
@@ -60,10 +61,56 @@ const SUBSCRIPTION_KEY = '@subscription_info';
 const MAX_ROLLOVER_DREAMS = 12; // 🔥 NEW: Maximum dreams that can accumulate
 
 const PRODUCT_IDS = {
+  // Subscriptions
   weekly: 'dream_weekly',
   basic: 'dream_basic_monthly',
-  consumable: 'dream_credits_consumable',
+
+  // Dream packs (consumables)
+  consumable: 'dream_credits_consumable',  // Keep for backwards compatibility
+  pack_1: 'dream_credits_consumable',      // 1 dream - $2.49
+  pack_2: 'dream_2_pack',                  // 2 dreams - $4.95
+  pack_3: 'dream_3_pack',                  // 3 dreams - $7.45
+  pack_4: 'dream_4_pack',                  // 4 dreams - $9.95
+  pack_5: 'dream_5_pack'                   // 5 dreams - $12.45
 };
+
+/**
+ * Maps dream quantity to correct product ID
+ */
+const QUANTITY_TO_PRODUCT: Record<number, string> = {
+  1: 'dream_credits_consumable',
+  2: 'dream_2_pack',
+  3: 'dream_3_pack',
+  4: 'dream_4_pack',
+  5: 'dream_5_pack'
+};
+
+/**
+ * Maps product IDs to credit amount
+ */
+const PRODUCT_TO_CREDITS: Record<string, number> = {
+  'dream_credits_consumable': 1,
+  'dream_2_pack': 2,
+  'dream_3_pack': 3,
+  'dream_4_pack': 4,
+  'dream_5_pack': 5
+};
+
+/**
+ * Gets product ID for a given dream quantity
+ */
+function getProductIdForQuantity(quantity: number): string {
+  // Clamp quantity between 1-5
+  const clampedQty = Math.max(1, Math.min(5, quantity));
+  return QUANTITY_TO_PRODUCT[clampedQty] || 'dream_credits_consumable';
+}
+
+/**
+ * Gets credits for a product ID
+ */
+function getCreditsForProduct(productId: string): number {
+  return PRODUCT_TO_CREDITS[productId] || 1;
+}
 
 const PLAN_DETAILS = {
   [PRODUCT_IDS.weekly]: {
@@ -321,8 +368,6 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
       // Step 5: Log in with new user
       const { customerInfo } = await Purchases.logIn(userId);
       console.log('✅ RevenueCat login successful');
-      console.log('   RC User ID:', customerInfo.originalAppUserId);
-      console.log('   Expected ID:', userId);
 
       // Step 6: Verify the login worked
       if (customerInfo.originalAppUserId !== userId) {
@@ -415,9 +460,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
 
       const activeEntitlements = Object.keys(customerInfo.entitlements.active);
 
-      console.log('🔍 [checkSubscriptionStatus] Active entitlements:', activeEntitlements);
-      console.log('🔍 [checkSubscriptionStatus] App User ID:', customerInfo.originalAppUserId);
-      console.log('🔍 [checkSubscriptionStatus] Current logged-in user:', user?.id);
+      console.log('🔍 [checkSubscriptionStatus] Checking entitlements...');
 
       if (customerInfo.originalAppUserId !== user?.id) {
         console.warn('⚠️ RevenueCat user ID mismatch!');
@@ -841,7 +884,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
           const freshCustomerInfo = await Purchases.getCustomerInfo();
           const activeEntitlements = Object.keys(freshCustomerInfo.entitlements.active);
 
-          console.log(`🔍 Active entitlements (attempt ${attempt}):`, activeEntitlements);
+          console.log(`🔍 Checking entitlements (attempt ${attempt})...`);
 
           if (activeEntitlements.length > 0) {
             const entitlementKey = activeEntitlements[0];
@@ -908,6 +951,15 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
               await updateDreamLimits(planId, details.dreams, details.period);
 
               console.log('✅ Subscription activated:', details.name, `(${details.dreams} dreams)`);
+
+              // 📊 Track subscription purchase for TikTok & Meta ads
+              const adTrackingPrices: Record<string, number> = {
+                'dream_weekly': 2.49,
+                'dream_basic_monthly': 7.49,
+              };
+              const adPrice = adTrackingPrices[planId] || 2.49;
+              trackSubscriptionPurchased(planId, details.name, adPrice, 'USD', user?.id);
+              console.log('📊 Tracked subscription purchase for ads:', details.name, '$' + adPrice);
 
               // 🔥 REFERRAL TRACKING - Track subscription attribution
               try {
@@ -993,83 +1045,87 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
     }
 
     try {
-      console.log('🛒 Starting custom purchase for', quantity, 'dreams');
-      console.log('📦 Product ID:', PRODUCT_IDS.consumable);
+      // Map quantity to correct product ID
+      const productId = getProductIdForQuantity(quantity);
+      console.log(`💳 Purchasing: ${quantity} dream(s) → Product: ${productId}`);
 
-      // STEP 1: Get offerings
-      const offerings = await Purchases.getOfferings();
-      console.log('📋 Available offerings:', Object.keys(offerings.all));
+      // Get the product from RevenueCat
+      const products = await Purchases.getProducts([productId]);
 
-      // STEP 2: Try to find consumable in offerings
-      let consumablePackage = null;
-
-      // Check current offering
-      if (offerings.current) {
-        consumablePackage = offerings.current.availablePackages.find(
-          pkg => pkg.product.identifier === PRODUCT_IDS.consumable
-        );
-        console.log('🔍 Found in current offering:', !!consumablePackage);
+      if (products.length === 0) {
+        throw new Error(`Product ${productId} not found. It may still be pending Apple approval.`);
       }
 
-      // Check all offerings if not found
-      if (!consumablePackage) {
-        for (const offering of Object.values(offerings.all)) {
-          consumablePackage = offering.availablePackages.find(
-            pkg => pkg.product.identifier === PRODUCT_IDS.consumable
-          );
-          if (consumablePackage) {
-            console.log('🔍 Found in offering:', offering.identifier);
-            break;
-          }
-        }
-      }
+      const product = products[0];
+      console.log(`✅ Found product: ${product.identifier} - ${product.priceString}`);
 
-      // STEP 3: Purchase
-      let customerInfo;
+      // Make the purchase
+      const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+      console.log('✅ Purchase completed');
 
-      if (consumablePackage) {
-        console.log('✅ Using package purchase');
-        const result = await Purchases.purchasePackage(consumablePackage);
-        customerInfo = result.customerInfo;
+      // Get actual credits from product (not from user input)
+      const creditsToAdd = getCreditsForProduct(productId);
+      console.log(`💎 Adding ${creditsToAdd} credits`);
+
+      // Add credits to dreamUsage collection (where DreamUsageContext reads from)
+      const usageRef = doc(db, 'dreamUsage', auth.currentUser.uid);
+      const usageDoc = await getDoc(usageRef);
+
+      let newBalance = creditsToAdd;
+
+      if (usageDoc.exists()) {
+        // Update existing document
+        const currentData = usageDoc.data();
+        const currentTotal = currentData.total || 0;
+        newBalance = currentTotal + creditsToAdd;
+
+        await setDoc(usageRef, {
+          total: newBalance,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+
+        console.log(`✅ Added ${creditsToAdd} credits to Firestore`);
+        console.log(`   Previous: ${currentTotal} dreams`);
+        console.log(`   New total: ${newBalance} dreams`);
       } else {
-        console.log('⚠️ Package not found, trying direct purchase with getProducts()');
+        // Create new document if it doesn't exist
+        await setDoc(usageRef, {
+          total: creditsToAdd,
+          used: 0,
+          planId: null,
+          rollover: 0,
+          resetDate: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
 
-        // RevenueCat 9.x requires getProducts() first to get StoreProduct objects
-        console.log('📦 Calling getProducts for:', PRODUCT_IDS.consumable);
-        const products = await Purchases.getProducts([PRODUCT_IDS.consumable]);
-        console.log('📦 Products returned:', products.length, products.map(p => p.identifier));
-
-        if (products.length === 0) {
-          throw new Error(`Product ${PRODUCT_IDS.consumable} not found in App Store Connect. Make sure the product is approved and available.`);
-        }
-
-        const product = products[0];
-        console.log('✅ Found product:', product.identifier, 'Price:', product.priceString);
-
-        const result = await Purchases.purchaseStoreProduct(product);
-        customerInfo = result.customerInfo;
+        console.log(`✅ Created new usage doc with ${creditsToAdd} dreams`);
+        newBalance = creditsToAdd;
       }
 
-      console.log('✅ Purchase completed via RevenueCat');
-      console.log('📊 Active entitlements:', Object.keys(customerInfo.entitlements.active));
-
-      // Add credits to Firestore
+      // Also update users collection for backup tracking (optional)
       const userDocRef = doc(db, 'users', auth.currentUser.uid);
       await setDoc(userDocRef, {
-        dreamCredits: increment(quantity),
-        lastPurchase: serverTimestamp(),
+        dreamCredits: increment(creditsToAdd),
+        lastPurchase: serverTimestamp()
       }, { merge: true });
 
-      console.log(`✅ Added ${quantity} credits to Firestore`);
+      console.log(`💰 New credit balance: ${newBalance}`);
 
-      // Verify
-      const updatedDoc = await getDoc(userDocRef);
-      const newBalance = updatedDoc.data()?.dreamCredits || 0;
-      console.log('💰 New credit balance:', newBalance);
+      // 📊 Track credits purchase for TikTok & Meta ads
+      const creditPrices: Record<number, number> = {
+        1: 2.49,
+        2: 4.95,
+        3: 7.45,
+        4: 9.95,
+        5: 12.45,
+      };
+      const price = creditPrices[creditsToAdd] || creditsToAdd * 2.49;
+      trackCreditsPurchased(productId, creditsToAdd, price, 'USD', user?.id);
+      console.log('📊 Tracked credits purchase for ads:', creditsToAdd, 'credits for $' + price);
 
       Alert.alert(
         'Purchase Successful! 🎉',
-        `${quantity} dream credits added.\nYou now have ${newBalance} credits.`,
+        `${creditsToAdd} dream credits added.\nYou now have ${newBalance} credits.`,
         [{ text: 'OK' }]
       );
 
@@ -1261,7 +1317,7 @@ export function DreamUsageProvider({ children }: { children: React.ReactNode }) 
           const freshCustomerInfo = await Purchases.getCustomerInfo();
           const activeEntitlements = Object.keys(freshCustomerInfo.entitlements.active);
 
-          console.log(`🔍 Active entitlements after restore (attempt ${attempt}):`, activeEntitlements);
+          console.log(`🔍 Checking entitlements after restore (attempt ${attempt})...`);
 
           if (activeEntitlements.length > 0) {
             await checkSubscriptionStatus();

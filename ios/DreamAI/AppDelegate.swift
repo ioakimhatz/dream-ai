@@ -1,6 +1,7 @@
 import Expo
 import React
 import ReactAppDependencyProvider
+import FBSDKCoreKit
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
@@ -29,6 +30,14 @@ public class AppDelegate: ExpoAppDelegate {
       launchOptions: launchOptions)
 #endif
 
+    // Initialize Facebook SDK
+    ApplicationDelegate.shared.application(
+      application,
+      didFinishLaunchingWithOptions: launchOptions
+    )
+
+    // TikTok tracking moved to server-side (Events API in tiktokTracking.ts)
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -38,6 +47,10 @@ public class AppDelegate: ExpoAppDelegate {
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
+    // Handle Facebook URL
+    if ApplicationDelegate.shared.application(app, open: url, options: options) {
+      return true
+    }
     return super.application(app, open: url, options: options) || RCTLinkingManager.application(app, open: url, options: options)
   }
 

@@ -32,12 +32,12 @@ export default function WelcomeScreen() {
 
   useEffect(() => {
     if (!fontsLoaded) return;
-    
+
     StatusBar.setBarStyle('dark-content');
     if (Platform.OS === 'android') {
       StatusBar.setBackgroundColor('#FFFFFF');
     }
-    
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -74,7 +74,7 @@ export default function WelcomeScreen() {
                 ref={video}
                 style={styles.phoneVideo}
                 source={{
-                  uri: 'https://res.cloudinary.com/dsfqvxje5/video/upload/v1758446232/d8vn6s2ed54zxcazo2dv.mp4',
+                  uri: 'https://res.cloudinary.com/dsfqvxje5/video/upload/v1768488248/s0cfysftu2pinczyjmvp.mov',
                 }}
                 useNativeControls={false}
                 resizeMode={ResizeMode.CONTAIN}
@@ -108,7 +108,7 @@ export default function WelcomeScreen() {
             <View style={styles.signInContainer}>
               <Text style={styles.signInPrompt}>
                 Already have an account?{' '}
-                <Text 
+                <Text
                   style={styles.signInLink}
                   onPress={() => router.push('/(auth)/signin')}
                 >
@@ -142,21 +142,25 @@ const styles = StyleSheet.create({
   // Visual Section - Balanced like Cal AI
   visualContainer: {
     flex: 1.8,  // Increased even more to make top section bigger
-    paddingTop: 150,  // Massive padding to really push it down
+    paddingTop: 120,  // REDUCED from 150 → 120 (moves UP)
     alignItems: 'center',
-    justifyContent: 'flex-end',  // Keep at flex-end to align to bottom of container
-    paddingBottom: 13,  // No bottom padding to stay close to title
+    justifyContent: 'center',  // Centers in container
+    paddingBottom: 0,  // No bottom padding to stay close to title
     backgroundColor: '#FFFFFF',
+    zIndex: 10,  // Front layer
   },
 
   // Phone container for proper video sizing
   phoneContainer: {
-    width: width * 1,  // 95% of screen width (bigger)
-    height: height * 0.56,  // Increased height for bigger video
-    maxWidth: 550,  // Increased max width
-    maxHeight: 580,  // Increased max height
+    width: width * 1.0,
+    height: height * 0.55,
+    maxWidth: 500,
+    maxHeight: 600,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: -50,  // Higher
+    marginBottom: 20,
+    zIndex: 10,
   },
 
   // Video styling - matches Cal AI size
@@ -175,6 +179,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     justifyContent: 'flex-end',
     backgroundColor: '#FFFFFF',
+    zIndex: 1,  // Back layer (behind video)
   },
 
   // Title with proper spacing
@@ -184,7 +189,7 @@ const styles = StyleSheet.create({
     color: '#000000',
     textAlign: 'center',
     marginBottom: 15,
-    marginTop: -20,  // Much more negative margin to pull closer
+    marginTop: 10,  // Positive space between video and title
     lineHeight: 46,
     letterSpacing: 0.5,
   },

@@ -24,6 +24,7 @@ import { LanguageProvider } from './contexts/LanguageContext';
 import { ConversationProvider } from './contexts/ConversationContext';
 import { setupNotificationListeners } from './utils/notificationService';
 import { syncHealthKitData } from './utils/healthKitSync';
+import { setUserProperties, clearUserData } from './services/analyticsService';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -99,6 +100,20 @@ function AppContent() {
     initializeRevenueCat();
   }, []); // ✅ Empty dependency array = runs once on mount
 
+  // 📊 Analytics SDKs (TikTok & Meta) are initialized in onboarding (step 4)
+  // to show the ATT prompt at the right time. trackAppInstall is called
+  // after the SDKs are ready via initializeAnalytics in onboarding.tsx.
+
+  // 📊 Set user properties when user authenticates
+  useEffect(() => {
+    if (user?.id) {
+      setUserProperties(user.id, user.email);
+      console.log('📊 Analytics user properties set');
+    } else {
+      clearUserData();
+    }
+  }, [user?.id, user?.email]);
+
   // 🔔 Setup notification listeners
   useEffect(() => {
     console.log('📱 Setting up notification listeners...');
@@ -109,7 +124,7 @@ function AppContent() {
       if (user?.id && token.data) {
         const { saveFCMToken } = await import('./utils/notificationService');
         await saveFCMToken(user.id, token.data);
-        console.log('🔄 Push token refreshed:', token.data);
+        console.log('🔄 Push token refreshed');
       }
     });
 

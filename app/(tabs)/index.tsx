@@ -1261,13 +1261,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    marginTop: 8,
-    marginBottom: 40,
+    marginTop: 5,
+    marginBottom: 50,
   },
   logoImg: { width: 50, height: 50, resizeMode: 'contain', marginRight: 3 },
-  logoWord: { fontSize: 28, color: '#fff', fontWeight: '500', letterSpacing: 0.5 },
+  logoWord: { fontSize: 28, color: '#fff', fontWeight: '500', letterSpacing: 1 },
 
-  micContainer: { alignItems: 'center', marginTop: 0, marginBottom: 40 },
+  micContainer: { alignItems: 'center', marginTop: 40, marginBottom: 50 },
   orbMessage: {
     marginTop: 16,
     fontSize: 16,
@@ -1286,7 +1286,7 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 
-  prompt: { fontSize: 28, color: '#fff', marginBottom: 24, marginTop: 20, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
+  prompt: { fontSize: 28, color: '#fff', marginBottom: -15, marginTop: 20, fontWeight: Platform.OS === 'ios' ? '700' : 'bold' },
   cursor: {
     color: '#fff',
     opacity: 0.7,

@@ -1,7 +1,7 @@
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Image,
@@ -21,6 +21,8 @@ import * as StoreReview from 'expo-store-review';
 import { Platform } from 'react-native';
 import { useSleepData } from '../hooks/useSleepData';
 import { registerForPushNotifications, saveFCMToken } from '../utils/notificationService';
+import { initializeAnalytics, trackAppInstall } from '../services/analyticsService';
+import { trackTikTokInstall } from '../services/tiktokTracking';
 
 // ---- SAFETY NET: guard all icons so missing glyphs don't crash a step ----
 const hasGlyph = (name: string) => (Ionicons as any)?.glyphMap?.[name] != null;
@@ -89,6 +91,30 @@ export default function OnboardingScreen() {
   const { authorized, wakeTime: detectedWakeTime, loading, error, requestPermissions } = useSleepData();
 
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+
+  // 📊 Trigger ATT prompt + initialize TikTok & Meta SDKs on 4th screen
+  useEffect(() => {
+    if (currentStep === 3) {
+      console.log('📊 Step 4 reached — requesting ATT permission & initializing analytics...');
+      initializeAnalytics().then(async () => {
+        trackAppInstall();
+
+        // Track TikTok install via server-side Events API
+        const userId = auth.currentUser?.uid || 'anon_' + Date.now();
+        try {
+          await trackTikTokInstall(userId);
+          console.log('📊 TikTok InstallApp event sent');
+        } catch (error) {
+          console.error('📊 TikTok tracking error:', error);
+        }
+
+        console.log('📊 Analytics initialized from onboarding step 4');
+      }).catch((error) => {
+        console.error('📊 Analytics init error from onboarding:', error);
+      });
+    }
+  }, [currentStep]);
+
   if (!fontsLoaded) return null;
 
   const handleContinue = async () => {

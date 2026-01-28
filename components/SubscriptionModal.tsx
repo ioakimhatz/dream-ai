@@ -30,7 +30,7 @@ export function SubscriptionModal({
   isPurchasing = false, // ✅ Default to false
 }: SubscriptionModalProps) {
   const router = useRouter();
-  const [customDreamCount, setCustomDreamCount] = useState(2);
+  const [customDreamCount, setCustomDreamCount] = useState(1);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -116,21 +116,22 @@ export function SubscriptionModal({
               {/* Dream Counter with +/- buttons */}
               <View style={styles.dreamCounter}>
                 <TouchableOpacity
-                  style={styles.counterButton}
-                  onPress={() => setCustomDreamCount(Math.max(2, customDreamCount - 1))}
-                  disabled={customDreamCount <= 2}
+                  style={[styles.counterButton, customDreamCount <= 1 && styles.counterButtonDisabled]}
+                  onPress={() => setCustomDreamCount(Math.max(1, customDreamCount - 1))}
+                  disabled={customDreamCount <= 1}
                 >
                   <Text style={styles.counterButtonText}>−</Text>
                 </TouchableOpacity>
 
                 <View style={styles.counterDisplay}>
                   <Text style={styles.counterNumber}>{customDreamCount}</Text>
-                  <Text style={styles.counterLabel}>dreams</Text>
+                  <Text style={styles.counterLabel}>{customDreamCount === 1 ? 'dream' : 'dreams'}</Text>
                 </View>
 
                 <TouchableOpacity
-                  style={styles.counterButton}
-                  onPress={() => setCustomDreamCount(customDreamCount + 1)}
+                  style={[styles.counterButton, customDreamCount >= 5 && styles.counterButtonDisabled]}
+                  onPress={() => setCustomDreamCount(Math.min(5, customDreamCount + 1))}
+                  disabled={customDreamCount >= 5}
                 >
                   <Text style={styles.counterButtonText}>+</Text>
                 </TouchableOpacity>
@@ -274,6 +275,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#7E78EA',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  counterButtonDisabled: {
+    opacity: 0.3,
   },
   counterButtonText: {
     fontSize: 24,

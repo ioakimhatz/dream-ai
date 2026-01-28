@@ -3,7 +3,7 @@
     "name": "Dream AI",
     "slug": "dreamverse-fresh",
     "owner": "ioakimxtz",
-    "version": "1.0.8",
+    "version": "2.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/logodreamai1024.png",
     "scheme": "dreamai",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ioakimxtz.dreamai",
-      "buildNumber": "18",
+      "buildNumber": "20",
       "usesAppleSignIn": true,
       "googleServicesFile": "./ios/GoogleService-Info.plist",
       "appleTeamId": "P79PBYKHK9",
@@ -29,9 +29,18 @@
         "NSMicrophoneUsageDescription": "This app uses the microphone to record your dream descriptions.",
         "NSHealthShareUsageDescription": "Dream AI needs access to your sleep schedule from the Health app to send you dream recording reminders at the perfect time when you wake up.",
         "NSHealthUpdateUsageDescription": "Dream AI needs to update your Health data to track your dream recording habits.",
+        "NSUserTrackingUsageDescription": "Dream AI uses this identifier to deliver personalized ads and measure ad performance. Your data helps us improve your experience.",
         "UIBackgroundModes": [
           "fetch",
           "remote-notification"
+        ],
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork"
+          }
         ]
       },
       "entitlements": {
@@ -137,6 +146,25 @@
         {
           "NSHealthShareUsageDescription": "Dream AI needs access to your sleep schedule from the Health app to send you dream recording reminders at the perfect time when you wake up.",
           "NSHealthUpdateUsageDescription": "Dream AI needs to update your Health data to track your dream recording habits."
+        }
+      ],
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Dream AI uses this identifier to deliver personalized ads and measure ad performance."
+        }
+      ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "1426912852258576",
+          "clientToken": "***REMOVED***",
+          "displayName": "Dream AI",
+          "scheme": "fb1426912852258576",
+          "advertiserIDCollectionEnabled": true,
+          "autoLogAppEventsEnabled": true,
+          "isAutoInitEnabled": true,
+          "iosUserTrackingPermission": "Dream AI uses this identifier to deliver personalized ads."
         }
       ]
     ],

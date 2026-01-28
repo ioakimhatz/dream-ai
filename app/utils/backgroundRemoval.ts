@@ -32,7 +32,6 @@ export async function removeBackground(
     } as any);
     
     console.log('📤 Sending to Photoroom API...');
-    console.log('🔑 Using API key:', PHOTOROOM_API_KEY?.substring(0, 20) + '...');
     
     // Call Photoroom API - EXACTLY as docs show
     const response = await fetch('https://sdk.photoroom.com/v1/segment', {
