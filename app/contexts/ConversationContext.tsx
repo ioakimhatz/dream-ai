@@ -10,6 +10,28 @@ import {
 } from '../services/openaiConversationService';
 import { speakText, stopSpeaking } from '../services/openaiTTSService';
 import { transcribeAudio } from '../utils/transcribe';
+import { getDoc, doc, setDoc } from 'firebase/firestore';
+import { db, auth } from '../config/firebaseConfig';
+
+/**
+ * ORB CONVERSATION COST ANALYSIS
+ *
+ * Per conversation costs (approximate):
+ * - Whisper API (audio transcription): $0.006 per minute
+ *   Average conversation: 1.5 minutes = $0.009
+ *
+ * - GPT-4o API (conversation):
+ *   Input: ~500 tokens @ $2.50/1M = $0.00125
+ *   Output: ~200 tokens @ $10.00/1M = $0.002
+ *   Total GPT: ~$0.003 per turn × 5 turns = $0.015
+ *
+ * - Total per conversation: ~$0.024 (2.4 cents)
+ *
+ * Promo code with 10 conversations: ~$0.24 cost
+ * Unlimited for 30 days @ 3/day avg: ~$2.16 cost
+ *
+ * RECOMMENDATION: Use limited (10-20 conversations) for promo codes
+ */
 
 export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
@@ -570,13 +592,41 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
     }
   }, [monitorAudioLevels, stopRecordingInternal, processTurn]);
 
-  // Check if user can start a new conversation (rate limiting)
+  // Check if user can start a new conversation (rate limiting + promo codes)
   const canStartConversation = useCallback(async (): Promise<boolean> => {
     try {
+      // Check if user has promo code conversation credits
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        const userData = userDoc.data();
+
+        // Check promo code benefits
+        if (userData?.promoConversationsRemaining && userData.promoConversationsRemaining > 0) {
+          // Check if promo expired
+          if (userData.promoCodeExpiry) {
+            const expiryDate = userData.promoCodeExpiry.toDate();
+            if (expiryDate > new Date()) {
+              console.log(`✅ Promo: ${userData.promoConversationsRemaining} conversations remaining`);
+              return true; // Allow conversation (will be decremented after completion)
+            } else {
+              // Expired - remove benefit silently
+              console.log('⏰ Promo expired, removing benefits');
+              await setDoc(doc(db, 'users', auth.currentUser.uid), {
+                promoConversationsRemaining: 0,
+              }, { merge: true });
+            }
+          } else {
+            // No expiry date set - allow
+            console.log(`✅ Promo: ${userData.promoConversationsRemaining} conversations remaining`);
+            return true;
+          }
+        }
+      }
+
+      // Regular rate limit check for non-promo users
       const lastConversationTime = await AsyncStorage.getItem(STORAGE_KEY_LAST_CONVERSATION);
 
       if (!lastConversationTime) {
-        // First time user, allow conversation
         return true;
       }
 
@@ -584,28 +634,30 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
       const now = Date.now();
       const hoursSinceLastConversation = (now - lastTime) / (1000 * 60 * 60);
 
-      console.log(`⏱️ Hours since last conversation: ${hoursSinceLastConversation.toFixed(2)} / ${CONVERSATION_COOLDOWN_HOURS}`);
+      if (hoursSinceLastConversation < CONVERSATION_COOLDOWN_HOURS) {
+        const tomorrowReset = new Date(lastTime);
+        tomorrowReset.setHours(new Date(lastTime).getHours() + 24, 0, 0, 0);
 
-      if (hoursSinceLastConversation >= CONVERSATION_COOLDOWN_HOURS) {
-        // Cooldown period has passed
-        return true;
+        const msUntilReset = tomorrowReset.getTime() - now;
+        const hoursUntilReset = Math.floor(msUntilReset / (1000 * 60 * 60));
+        const minutesUntilReset = Math.ceil((msUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+
+        const resetMessage = hoursUntilReset > 0
+          ? `Come back in ${hoursUntilReset}h ${minutesUntilReset}m`
+          : `Come back in ${minutesUntilReset} minutes`;
+
+        Alert.alert(
+          '✨ Daily Free Conversation Used',
+          `${resetMessage} for your next free orb conversation!\n\n💡 Tip: You can still type your dream using the text input below.`,
+          [{ text: 'Got it' }]
+        );
+        return false;
       }
 
-      // Still in cooldown period
-      const hoursRemaining = CONVERSATION_COOLDOWN_HOURS - hoursSinceLastConversation;
-      const minutesRemaining = Math.ceil(hoursRemaining * 60);
-
-      Alert.alert(
-        'Daily Limit Reached',
-        `You've used your daily dream conversation. Come back in ${minutesRemaining} minutes!`,
-        [{ text: 'OK' }]
-      );
-
-      return false;
-    } catch (error) {
-      console.error('❌ Error checking conversation rate limit:', error);
-      // On error, allow conversation (fail open)
       return true;
+    } catch (error) {
+      console.error('❌ Error checking conversation availability:', error);
+      return false;
     }
   }, []);
 
@@ -699,6 +751,41 @@ export function ConversationProvider({ children, onDreamPromptReady }: Conversat
         console.log('✅ Conversation timestamp saved for rate limiting');
       } catch (error) {
         console.error('❌ Error saving conversation timestamp:', error);
+      }
+
+      // Decrement promo conversation count if user has promo
+      if (auth.currentUser) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+          const userData = userDoc.data();
+
+          if (userData?.promoConversationsRemaining && userData.promoConversationsRemaining > 0) {
+            const newCount = userData.promoConversationsRemaining - 1;
+            await setDoc(doc(db, 'users', auth.currentUser.uid), {
+              promoConversationsRemaining: newCount,
+            }, { merge: true });
+
+            console.log(`✅ Promo conversation used. ${newCount} remaining.`);
+
+            // Show user their remaining count
+            if (newCount === 0) {
+              Alert.alert(
+                '🎉 Promo Conversations Complete',
+                'You\'ve used all your promo conversations! Tomorrow you\'ll get your daily free conversation back.',
+                [{ text: 'Got it' }]
+              );
+            } else if (newCount <= 3) {
+              // Warn when running low
+              Alert.alert(
+                `✨ ${newCount} Promo Conversations Left`,
+                'Use them wisely!',
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        } catch (error) {
+          console.error('Error decrementing promo conversations:', error);
+        }
       }
 
       // ✅ NEW: Start overall conversation duration timer
