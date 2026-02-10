@@ -28,22 +28,49 @@ yarn-error.*
 
 # macOS
 .DS_Store
-*.pem
+Thumbs.db
 
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-app-example
-.vercel
+# Environment & secrets
 .env
+.env.*
 .env.local
 .env.production
 .env.development
 .env.test
-functions/.env
-functions/.env.local
 **/.env
 **/.env.local
+**/.env.*
+
+# EAS config (contains build env vars)
+eas.json
+
+# Firebase service files
+google-services.json
+GoogleService-Info.plist
+**/google-services.json
+**/GoogleService-Info.plist
+firebase-service-account*.json
+serviceAccountKey*.json
+
+# Cloud Functions env
+functions/.env
+functions/.env.*
+dreamai-api/.env
+dreamai-api/.env.*
+
+# Build artifacts & platform backups
+ios-backup-final/
+
+# typescript
+*.tsbuildinfo
+
+# Other
+app-example
+.vercel
+
+# IDE
+.vscode/
+.idea/
+
+# local env files (legacy)
+*.pem
