@@ -1,7 +1,7 @@
 // app/services/tiktokTracking.ts
 // Server-side TikTok Events API tracking (replaces native SDK)
 
-const TIKTOK_ACCESS_TOKEN = '***REMOVED***';
+const TIKTOK_ACCESS_TOKEN = process.env.EXPO_PUBLIC_TIKTOK_ACCESS_TOKEN || '';
 const TIKTOK_PIXEL_ID = 'D5T5S1RC77UDQTF8AVJ0';
 const TIKTOK_API_URL = 'https://business-api.tiktok.com/open_api/v1.3/event/track/';
 

@@ -21,8 +21,7 @@ export default async function handler(req, res) {
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
         console.log(`Generating OTP ${otp} for ${email}`);
 
-        // Your Resend API key
-        const RESEND_API_KEY = '***REMOVED***';
+        const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
         const response = await fetch('https://api.resend.com/emails', {
             method: 'POST',

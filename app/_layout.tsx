@@ -86,7 +86,7 @@ function AppContent() {
       try {
         console.log('💰 Configuring RevenueCat (ONE TIME ONLY)...');
         if (Platform.OS === 'android') {
-          await Purchases.configure({ apiKey: '***REMOVED***' });
+          await Purchases.configure({ apiKey: 'goog_yqsWIMYUkDARBruIeYknHVJXHYv' });
         } else if (Platform.OS === 'ios') {
           await Purchases.configure({ apiKey: 'appl_vRUwRfxjglNcNpuBpAOGxFSKohU' });
         }

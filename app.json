@@ -158,7 +158,7 @@
         "react-native-fbsdk-next",
         {
           "appID": "1426912852258576",
-          "clientToken": "***REMOVED***",
+          "clientToken": "9305b15ac480d99837489cfb496af4f9",
           "displayName": "Dream AI",
           "scheme": "fb1426912852258576",
           "advertiserIDCollectionEnabled": true,
