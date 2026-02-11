@@ -4,7 +4,7 @@ import * as dotenv from 'dotenv';
 // 🔥 CRITICAL: Load .env BEFORE anything else!
 dotenv.config();
 
-console.log('✅ Environment variables loaded from .env');
+console.log('✅ Environment variables loaded from .env (v2 - rotated keys)');
 
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
