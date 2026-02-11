@@ -44,11 +44,7 @@ Thumbs.db
 # EAS config (contains build env vars)
 eas.json
 
-# Firebase service files
-google-services.json
-GoogleService-Info.plist
-**/google-services.json
-**/GoogleService-Info.plist
+# Firebase service account keys (actual secrets)
 firebase-service-account*.json
 serviceAccountKey*.json
 
