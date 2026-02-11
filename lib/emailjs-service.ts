@@ -1,8 +1,7 @@
 import { Alert } from 'react-native';
 
 export class EmailService {
-  // THIS IS YOUR WORKING URL - TESTED AND CONFIRMED!
-  private static VERCEL_API_URL = 'https://dreamverse-fresh-hkgta9kz4-dream-ais-projects-80e70262.vercel.app/api/send-otp';
+  private static VERCEL_API_URL = 'https://dreamverse-fresh.vercel.app/api/send-otp';
   
   static async sendOTP(email: string): Promise<{ success: boolean; otp?: string; error?: string }> {
     try {
